@@ -49,13 +49,16 @@ async function scanSymbol(symbol, timeframe) {
         const fetchCount = (!candles || candles.length < 5) ? 300 : 5;
 
         const freshCandles = await getCandles(symbol, timeframe, fetchCount);
-        if (!freshCandles || freshCandles.length === 0) return;
+        if (!freshCandles || freshCandles.length === 0) {
+            console.log(`[Scanner] Skipping ${symbol} ${timeframe}: API failure or no data`);
+            return null;
+        }
 
         // Update memory cache and get full history
         updateCandles(symbol, timeframe, freshCandles);
         candles = getCachedCandles(symbol, timeframe);
 
-        if (!candles || candles.length < 50) return;
+        if (!candles || candles.length < 50) return null;
 
         // ── Volatility Filter ─────────────────────────────────────
         const close = candles.map(c => c.close);
@@ -68,7 +71,7 @@ async function scanSymbol(symbol, timeframe) {
         const lastATR = atrVals[atrVals.length - 1] ?? 0;
         const atrPct = (lastATR / close[close.length - 1]) * 100;
 
-        if (atrPct < 0.08) return;
+        if (atrPct < 0.08) return null;
 
         // Fetch futures data and Orderbook depth (Parallel)
         const [futuresData, depth] = await Promise.all([
@@ -81,7 +84,11 @@ async function scanSymbol(symbol, timeframe) {
 
         // Run full technical analysis
         const result = runAIAnalysis(candles, timeframe, symbol, futuresData);
-        if (result.error) return;
+
+        // Safety check for analysis result
+        if (!result || result.error || !result.score) {
+            return null;
+        }
 
         // Always store scan results so the React UI always has data
         addSignal(result);

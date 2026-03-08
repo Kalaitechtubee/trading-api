@@ -11,32 +11,45 @@ const BINANCE_FUTURES_BASE = 'https://fapi.binance.com/fapi/v1';
 // Stablecoins to ignore for scanning
 const STABLECOINS = ['USDC', 'FDUSD', 'TUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'BUSD', 'AEUR', 'ZAR', 'USDS'];
 
+const DATA_API_BASE = 'https://data-api.binance.vision/api/v3';
+
 /**
  * Fetch OHLCV candle data from Binance spot
- * @param {string} symbol  e.g. "BTCUSDT"
- * @param {string} interval e.g. "15m"
- * @param {number} limit    Number of candles (max 1000)
- * @returns {Array<{time,open,high,low,close,volume}>}
+ * Uses a primary bypass endpoint for restricted regions (Render/Cloud)
  */
 export async function getCandles(symbol, interval = '15m', limit = 300) {
-    try {
-        const res = await axios.get(`${BINANCE_BASE}/klines`, {
-            params: { symbol, interval, limit },
-            timeout: 10000
-        });
+    // Primary: data-api.binance.vision (Not restricted)
+    // Fallback: api.binance.com (Standard)
+    const endpoints = [
+        `${DATA_API_BASE}/klines`,
+        `${BINANCE_BASE}/klines`
+    ];
 
-        return res.data.map(k => ({
-            time: k[0] / 1000,          // Unix seconds
-            open: Number(k[1]),
-            high: Number(k[2]),
-            low: Number(k[3]),
-            close: Number(k[4]),
-            volume: Number(k[5])
-        }));
-    } catch (err) {
-        console.error(`[BinanceService] Failed to fetch ${symbol}:`, err.message);
-        return [];
+    for (const url of endpoints) {
+        try {
+            const res = await axios.get(url, {
+                params: { symbol, interval, limit },
+                timeout: 8000
+            });
+
+            if (res.data && Array.isArray(res.data)) {
+                return res.data.map(k => ({
+                    time: k[0] / 1000,          // Unix seconds
+                    open: Number(k[1]),
+                    high: Number(k[2]),
+                    low: Number(k[3]),
+                    close: Number(k[4]),
+                    volume: Number(k[5])
+                }));
+            }
+        } catch (err) {
+            console.warn(`[BinanceService] ${url} failed for ${symbol}: ${err.message}`);
+            // Continue to next endpoint
+        }
     }
+
+    console.error(`[BinanceService] All endpoints failed for ${symbol}`);
+    return null; // Return null on complete failure to trigger scanner skip
 }
 
 /**

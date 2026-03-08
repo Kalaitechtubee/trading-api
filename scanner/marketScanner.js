@@ -134,34 +134,37 @@ export async function scanMarket() {
         await Promise.all(scanPromises);
 
         // ── ELITE SIGNAL FILTERING ──
-        // 1. Filter candidates (Score >= 75)
+        // 1. Filter candidates (Score >= 75 and not WAIT)
         let candidates = allResults.filter(r => r.score >= MIN_SCORE_TO_ALERT && r.action !== 'WAIT');
 
-        // 2. Multi-Timeframe Confirmation (5m + 15m same direction)
         const eliteSignals = [];
-        const processedPairs = new Set();
+        const processedSymbols = new Set();
 
         for (const sig of candidates) {
-            const key = `${sig.symbol}_${sig.timeframe}`;
-            if (processedPairs.has(key)) continue;
+            if (processedSymbols.has(sig.symbol)) continue;
 
             const m5 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '5m');
             const m15 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '15m');
 
-            if (m5 && m15 && m5.action === m15.action && m5.action !== 'WAIT') {
-                // If MTF matches, prioritize the 15m signal for the alert
-                const bestSig = m15.score >= m5.score ? m15 : m5;
+            if (m5 && m15) {
+                const isBullishSetup = (m5.action.includes('BUY') && m15.score >= 60);
+                const isBearishSetup = (m5.action.includes('SELL') && m15.score <= 40);
 
-                if (canAlert(`${sig.symbol}_ELITE`)) {
-                    eliteSignals.push({
-                        ...bestSig,
-                        isElite: true,
-                        mtfConfirmed: true,
-                        mtfScore: Math.round((m5.score + m15.score) / 2)
-                    });
+                if (isBullishSetup || isBearishSetup) {
+                    if (canAlert(`${sig.symbol}_ELITE`)) {
+                        // Prioritize the timeframe with the stronger action for the alert details
+                        const alertSig = (m5.score >= m15.score || m15.action === 'WAIT') ? m5 : m15;
+
+                        eliteSignals.push({
+                            ...alertSig,
+                            isElite: true,
+                            mtfConfirmed: true,
+                            mtfScore: Math.round((m5.score + m15.score) / 2)
+                        });
+                        processedSymbols.add(sig.symbol);
+                    }
                 }
             }
-            processedPairs.add(key);
         }
 
         // 3. Limit to Top 2 Elite Signals per scan
@@ -173,7 +176,7 @@ export async function scanMarket() {
             const premiumLabel = elite.score >= PREMIUM_SIGNAL_THRESHOLD ? '👑 PREMIUM' : '🚀 ELITE';
             await sendSignalAlert({ ...elite, premiumLabel });
             alertCooldown.set(`${elite.symbol}_ELITE`, Date.now());
-            console.log(`[Scanner] ${premiumLabel} alert sent: ${elite.symbol} ${elite.action} at ${elite.score}%`);
+            console.log(`[Scanner] ${premiumLabel} alert sent: ${elite.symbol} ${elite.action} at ${elite.score}% (MTF Confirmed)`);
         }
 
     } catch (err) {

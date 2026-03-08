@@ -45,14 +45,14 @@ export async function sendSignalAlert(signal) {
 
     const {
         symbol, action, score, price,
-        stopLoss, target, timeframe
+        stopLoss, target, timeframe, strengthLabel
     } = signal;
 
     const targetType = signal.targetType || 'Structure';
     const institutional = signal.institutional || {};
-    const premiumLabel = signal.premiumLabel || '� ELITE';
-    const strengthEmoji = score >= 82 ? '�' : '🔥';
-    const signalEmoji = action === 'BUY' ? '�' : '�';
+    const premiumLabel = signal.premiumLabel || '🛡️ ELITE';
+    const strengthEmoji = score >= 82 ? '💎' : '🔥';
+    const signalEmoji = action === 'BUY' ? '🟢' : '🔴';
 
     const regime = institutional.regime || 'Unknown';
     const session = institutional.session || 'Unknown';

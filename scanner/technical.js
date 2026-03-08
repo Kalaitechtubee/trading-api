@@ -452,112 +452,174 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     const volScore = volatilityScore(candles);
     const vwapScore = vwapData.score;
 
+    // ── Indicator Pre-calculation (Fixed for ReferenceError) ──
+    const rsiValues = RSI.calculate({ values: prices, period: 14 });
+    const ema200Arr = EMA.calculate({ values: prices, period: 200 });
+    const ema200 = ema200Arr[ema200Arr.length - 1];
+
+    const last20 = candles.slice(-20);
+    const avgVol = last20.reduce((s, c) => s + c.volume, 0) / 20;
+    const isVolumeSpike = candles[candles.length - 1].volume > avgVol * 1.5;
+
+    // ── Futures Confirmation Score (Weight: 5%) ──
+    let futuresScore = 50;
+    if (futuresData && futuresData.openInterest > 0) {
+        const isPriceUp = currentPrice > candles[candles.length - 2].close;
+        const isBullishMS = marketStructureData.score > 50;
+        if (isPriceUp && isBullishMS) futuresScore = 100;
+        else if (!isPriceUp && !isBullishMS) futuresScore = 0;
+    }
+
     // Orderbook (Module 12)
     const orderbookData = calculateOrderbookImbalance(futuresData?.depth);
     const orderbookScore = orderbookData.score;
 
-    // ── EMA 200 Trend Check ──
-    const ema200Arr = EMA.calculate({ values: prices, period: 200 });
-    const ema200 = ema200Arr[ema200Arr.length - 1];
+    // ── Spread & Slippage Calculation ──
+    let spread = 0;
+    if (futuresData?.depth?.asks?.length > 0 && futuresData?.depth?.bids?.length > 0) {
+        const bestAsk = futuresData.depth.asks[0][0];
+        const bestBid = futuresData.depth.bids[0][0];
+        spread = (bestAsk - bestBid) / bestBid;
+    }
 
-    // Preliminary confidence based on technicals
-    const confidence =
-        marketStructureScore * 0.25 +
-        srRating * 0.15 +
-        volumeScore * 0.15 +
-        liqScore * 0.10 +
-        momentumScore * 0.10 +
-        volScore * 0.10 +
-        vwapScore * 0.05 +
-        orderbookScore * 0.10;
+    // ── STEP 4: DUAL SCORE CALCULATION (Fixes missing SELL signals) ──
+    let bullishScore = 0;
+    let bearishScore = 0;
+
+    // A. Market Structure (25%)
+    if (marketStructureData.structure === 'BULLISH') bullishScore += 25;
+    else if (marketStructureData.structure === 'BEARISH') bearishScore += 25;
+
+    // B. Support / Resistance (15%)
+    if (srRating >= 75) bullishScore += 15;
+    else if (srRating <= 28) bearishScore += 15;
+
+    // C. Volume Flow + Profile (15%)
+    if (volumeScore > 65) bullishScore += 15;
+    else if (volumeScore < 35) bearishScore += 15;
+
+    // D. Liquidity Zones (10%)
+    if (liqScore > 60) bullishScore += 10;
+    else if (liqScore < 40) bearishScore += 10;
+
+    // E. Momentum - RSI & MACD (10%)
+    if (momentumScore > 60) bullishScore += 10;
+    else if (momentumScore < 40) bearishScore += 10;
+
+    // User Requirement: RSI < 40 contributes to bearishness
+    const currentRSI_val = parseFloat(rsiValues[rsiValues.length - 1] ?? 50);
+    if (currentRSI_val < 40) bearishScore += 5;
+    if (currentRSI_val > 60) bullishScore += 5;
+
+    // F. VWAP Bias (5%)
+    if (vwapData.bias === 'Bullish') bullishScore += 5;
+    else bearishScore += 5;
+
+    // G. Orderbook Imbalance (10%)
+    if (orderbookData.score > 60) bullishScore += 10;
+    else if (orderbookData.score < 40) bearishScore += 10;
+
+    // H. EMA 200 Trend (10%)
+    if (currentPrice > ema200) bullishScore += 10;
+    else bearishScore += 10;
+
+    // I. Futures Confirmation (5%)
+    if (futuresScore === 100) bullishScore += 5;
+    else if (futuresScore === 0) bearishScore += 5;
 
     // ── SESSION FILTER ──
     const hour = new Date().getUTCHours();
     const isLondon = hour >= 7 && hour <= 12;
     const isNY = hour >= 13 && hour <= 20;
+    let sessionBonus = (isLondon || isNY) ? 5 : -10;
 
-    let sessionBonus = 0;
-    if (isLondon || isNY) sessionBonus = 5;
-    else sessionBonus = -10;
+    // Apply session bonus to the dominant side
+    if (bullishScore > bearishScore) bullishScore += sessionBonus;
+    else if (bearishScore > bullishScore) bearishScore += sessionBonus;
 
-    const probability = Math.round(Math.min(Math.max(confidence + sessionBonus, 0), 100));
-
-    // Preliminary action to check trend alignment
-    const initialAction = probability >= 65 ? 'BUY' : (probability <= 35 ? 'SELL' : 'WAIT');
-
-    // Filter signals against EMA 200 Trend
-    const trendAlign = (initialAction === 'BUY' && currentPrice > ema200) ||
-        (initialAction === 'SELL' && currentPrice < ema200);
-
-    let futuresScore = 50;
-    if (futuresData && futuresData.openInterest > 0) {
-        const isPriceUp = currentPrice > candles[candles.length - 2].close;
-        const isBullish = marketStructureScore > 50;
-        if (isPriceUp && isBullish) futuresScore = 100;
-        else if (!isPriceUp && !isBullish) futuresScore = 0;
-    }
+    // Final Probabilities
+    const bullishProb = Math.round(Math.min(Math.max(bullishScore, 0), 100));
+    const bearishProb = Math.round(Math.min(Math.max(bearishScore, 0), 100));
 
     // ── STEP 5: Risk & Alignment ──────────────────────────────
     const liquiditySweep = detectLiquiditySweep(candles);
     const orderBlock = detectOrderBlocks(candles);
     const patternData = detectCandlePattern(candles);
-    const breakoutProb = calculateBreakoutProbability(candles, volumeScore, momentumScore, volScore);
+    const volumeScore_val = (volumeData.score + volProfile.score) / 2;
+    const breakoutProb = calculateBreakoutProbability(candles, volumeScore_val, momentumScore, volScore);
 
     const high = candles.map(c => c.high), low = candles.map(c => c.low);
     const atrArr = ATR.calculate({ high, low, close: prices, period: 14 });
     const currentATR = atrArr[atrArr.length - 1] ?? currentPrice * 0.01;
     const atrPct = (currentATR / currentPrice) * 100;
 
-    // ── ADAPTIVE THRESHOLD (New Improvement) ───────────────
-    // If volatility is high, we lower the threshold to catch the move earlier.
-    // If volatility is low, we raise it to avoid fakeouts in the noise.
+    // ── ADAPTIVE THRESHOLD ──────────────────────────────
     let trendThreshold = 65;
-    if (atrPct > 1.2) trendThreshold = 62; // Faster entry in volatile markets
-    else if (atrPct < 0.3) trendThreshold = 72; // Strict entry in slow markets
+    if (atrPct > 1.2) trendThreshold = 60; // Lower threshold to catch moves in high vol
+    else if (atrPct < 0.3) trendThreshold = 72; // Stricter in low vol
 
-    const isRegimeAligned = (initialAction === 'BUY' && regime.includes('BULLISH')) ||
-        (initialAction === 'SELL' && regime.includes('BEARISH')) || (regime === 'RANGING');
+    // ── SIGNAL DECISION ──
+    let finalAction = 'WAIT';
+    let adjustedProb = 50;
 
-    const last20 = candles.slice(-20);
-    const avgVol = last20.reduce((s, c) => s + c.volume, 0) / 20;
-    const isVolumeSpike = candles[candles.length - 1].volume > avgVol * 1.5;
+    if (bullishProb > bearishProb && bullishProb >= trendThreshold) {
+        finalAction = 'BUY';
+        adjustedProb = bullishProb;
+    } else if (bearishProb > bullishProb && bearishProb >= (trendThreshold - 5)) {
+        finalAction = 'SELL';
+        adjustedProb = bearishProb;
+    }
 
-    let adjustedProb = confidence + sessionBonus;
-    if (isVolumeSpike) adjustedProb += 8;
-    if (trendAlign) adjustedProb += 5;
-    if (isVolumeSpike && liquiditySweep) adjustedProb += 5;
+    // ── Trend Strength Detection ──
+    const trendStrength = Math.abs(bullishProb - bearishProb);
+    if (trendStrength < 15) {
+        finalAction = 'WAIT';
+    }
 
-    // ── Breakout Probability & Resistance Check ──
-    const abovePrice = resistances.filter(r => r > currentPrice);
-    const nearestResistance = abovePrice.length > 0 ? Math.min(...abovePrice) : currentPrice * 1.02;
+    // ── ADVANCED ACCURACY FILTERS ──
 
-    // Breakout logic: Price > Resistance + Volume Spike + Orderbook
-    const isBreakout = (currentPrice > nearestResistance && isVolumeSpike && parseFloat(orderbookData.imbalance || 0) > 0.3);
-    if (isBreakout) adjustedProb += 12;
+    // 1. Funding Rate Filter (Overcrowding)
+    const fRate = parseFloat(futuresData?.fundingRate ?? '0');
+    if (fRate > 0.03 && finalAction === 'BUY') finalAction = 'WAIT';
+    if (fRate < -0.03 && finalAction === 'SELL') finalAction = 'WAIT';
 
-    adjustedProb = Math.min(Math.max(Math.round(adjustedProb), 0), 100);
+    // 2. Liquidity Pool Filter (Avoid Sweep Traps)
+    if (eqHL.eqh && finalAction === 'BUY') finalAction = 'WAIT';
+    if (eqHL.eql && finalAction === 'SELL') finalAction = 'WAIT';
 
-    // ── CONFLUENCE FILTER (Enhanced) ──────────────────────────
+    // 3. Orderbook Spread Filter
+    if (spread > 0.002) finalAction = 'WAIT';
+
+    // 4. Volume & Score Confirmation
+    if (!isVolumeSpike && adjustedProb < 80 && finalAction !== 'WAIT') {
+        finalAction = 'WAIT';
+    }
+
+    // 5. Multi-Candle Confirmation (Last 3)
+    const last3 = candles.slice(-3);
+    const bullishCandles = last3.filter(c => c.close > c.open).length;
+    const bearishCandles = last3.filter(c => c.close < c.open).length;
+
+    if (finalAction === 'BUY' && bullishCandles < 2) finalAction = 'WAIT';
+    if (finalAction === 'SELL' && bearishCandles < 2) finalAction = 'WAIT';
+
+    // ── CONFLUENCE FACTORS ──
     const factors = [];
-    if (marketStructureScore > 60) factors.push('Trend Alignment');
-    if (srRating > 60) factors.push('S/R Bounce');
+    if (marketStructureData.structure === 'BULLISH') factors.push('Bullish Trend Alignment');
+    if (marketStructureData.structure === 'BEARISH') factors.push('Bearish Trend Alignment');
+    if (srRating >= 75) factors.push('Support Bounce');
+    if (srRating <= 28) factors.push('Resistance Rejection');
     if (isVolumeSpike) factors.push('Volume Spike');
-    if (orderbookData.score > 65) factors.push('Orderbook Bids+');
-    if (orderbookData.score < 35) factors.push('Orderbook Asks+');
+    if (orderbookData.score > 60) factors.push('Orderbook Bids+');
+    if (orderbookData.score < 40) factors.push('Orderbook Asks+');
     if (liquiditySweep) factors.push('Liquidity Sweep');
-    if (trendAlign) factors.push('EMA 200 Confluence');
+    if (finalAction !== 'WAIT' && (currentPrice > ema200 && finalAction === 'BUY')) factors.push('EMA 200 Support');
+    if (finalAction !== 'WAIT' && (currentPrice < ema200 && finalAction === 'SELL')) factors.push('EMA 200 Resistance');
 
-    // Elite Quality: Final score adjusted by confluence count
-    if (factors.length >= 4) adjustedProb += 15;
-    adjustedProb = Math.min(Math.round(adjustedProb), 100);
+    const isRegimeAligned = (finalAction === 'BUY' && regime.includes('BULLISH')) ||
+        (finalAction === 'SELL' && regime.includes('BEARISH')) || (regime === 'RANGING');
 
-    let finalAction = adjustedProb >= trendThreshold ? 'BUY' : (adjustedProb <= (100 - trendThreshold) ? 'SELL' : 'WAIT');
-
-    // Filter signals against EMA 200 Trend
-    if (finalAction === 'BUY' && currentPrice < ema200) finalAction = 'WAIT';
-    if (finalAction === 'SELL' && currentPrice > ema200) finalAction = 'WAIT';
-
-    if (finalAction !== 'WAIT' && (factors.length < 3 || atrPct < 0.12)) {
+    if (finalAction !== 'WAIT' && (factors.length < 2 || atrPct < 0.08)) {
         finalAction = 'WAIT';
     }
 
@@ -566,34 +628,40 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     const upperWick = lastCandle.high - Math.max(lastCandle.open, lastCandle.close);
     const lowerWick = Math.min(lastCandle.open, lastCandle.close) - lastCandle.low;
     if (finalAction === 'BUY' && upperWick > bodySize * 1.8) finalAction = 'WAIT';
-    else if (finalAction === 'SELL' && lowerWick > bodySize * 1.8) finalAction = 'WAIT';
+    else if (finalAction === 'SELL' && lowerWick > bodySize * 2.5) finalAction = 'WAIT';
 
     const isTrendSignal = adjustedProb >= trendThreshold || adjustedProb <= (100 - trendThreshold);
     const isBreakoutSignal = (adjustedProb > 60 || adjustedProb < 40) && isVolumeSpike && liquiditySweep;
 
+    const totalBias = bullishProb > bearishProb ? 'Bullish' : (bearishProb > bullishProb ? 'Bearish' : 'Neutral');
+
     let strengthLabel = 'Normal';
-    const confidenceScore = Math.abs(adjustedProb - 50) * 2;
-    if (confidenceScore > 85) strengthLabel = 'Institutional';
-    else if (confidenceScore > 70) strengthLabel = 'Strong';
-    else if (confidenceScore < 40) strengthLabel = 'Weak';
+    if (adjustedProb >= 85) strengthLabel = 'Institutional';
+    else if (adjustedProb >= 75) strengthLabel = 'Strong';
+    else if (adjustedProb < 65) strengthLabel = 'Weak';
 
     // ── RISK MODEL (TP/SL) ───────────────────────────
-    let slVal = finalAction === 'BUY' ? currentPrice - currentATR * 1.5 : currentPrice + currentATR * 1.5;
-    let tp1 = finalAction === 'BUY' ? currentPrice + currentATR * 2.0 : currentPrice - currentATR * 2.0;
-    let tp2 = finalAction === 'BUY' ? currentPrice + currentATR * 4.0 : currentPrice - currentATR * 4.0;
+    const riskAmount = currentATR * 1.5;
+    let slVal = finalAction === 'BUY' ? currentPrice - riskAmount : currentPrice + riskAmount;
 
-    let targetType = 'Volatility Expansion';
+    // User wants Target 1 = Entry + (Risk * 2) and Target 2 = Entry + (Risk * 3)
+    let tp1 = finalAction === 'BUY' ? currentPrice + (riskAmount * 2) : currentPrice - (riskAmount * 2);
+    let tp2 = finalAction === 'BUY' ? currentPrice + (riskAmount * 3) : currentPrice - (riskAmount * 3);
+
+    let targetType = 'Institutional RR';
 
     if (finalAction === 'BUY') {
-        if (volProfile.vah > currentPrice) { tp1 = volProfile.vah; targetType = 'Volume VAH'; }
+        if (volProfile.vah > currentPrice && volProfile.vah < tp1) { tp1 = volProfile.vah; targetType = 'Volume VAH'; }
     } else if (finalAction === 'SELL') {
-        if (volProfile.val < currentPrice) { tp1 = volProfile.val; targetType = 'Volume VAL'; }
+        if (volProfile.val < currentPrice && volProfile.val > tp1) { tp1 = volProfile.val; targetType = 'Volume VAL'; }
     }
 
-    const ema20Arr = EMA.calculate({ values: prices, period: 20 });
-    const ema50Arr = EMA.calculate({ values: prices, period: 50 });
-    const rsiValues = RSI.calculate({ values: prices, period: 14 });
     const currentRSI = (rsiValues[rsiValues.length - 1] ?? 50).toFixed(1);
+
+    // Calculate dynamic Risk Reward ratio for the selected TP1
+    const actualRisk = Math.abs(currentPrice - slVal);
+    const actualReward = Math.abs(tp1 - currentPrice);
+    const rrRatio = (actualReward / actualRisk).toFixed(1);
 
     // Expiry: 15 minutes for scalping
     const expiresInMs = 15 * 60 * 1000;
@@ -609,7 +677,7 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
         target2: parseFloat(tp2.toFixed(8)),
         targetType,
         strengthLabel,
-        riskReward: '1:2.0',
+        riskReward: `1:${rrRatio}`,
         currentRSI,
         isVolumeSpike,
         factors,
@@ -618,6 +686,9 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
         timestamp: Date.now(),
         expiresAt: Date.now() + expiresInMs,
         isRegimeAligned,
+        bias: totalBias,
+        bullishScore,
+        bearishScore,
         isTrendSignal,
         isBreakoutSignal,
         strategyScores: {
@@ -629,6 +700,8 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
             volatility: Math.round(volScore),
             vwapBias: Math.round(vwapScore),
             orderbook: Math.round(orderbookScore),
+            bullishScore: Math.round(bullishScore),
+            bearishScore: Math.round(bearishScore),
             futures: Math.round(futuresScore)
         },
         institutional: {

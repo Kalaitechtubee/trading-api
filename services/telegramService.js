@@ -45,13 +45,14 @@ export async function sendSignalAlert(signal) {
 
     const {
         symbol, action, score, price,
-        stopLoss, target, timeframe, strengthLabel
+        stopLoss, target, target2, riskReward, timeframe, strengthLabel,
+        timestamp, expiresAt
     } = signal;
 
     const targetType = signal.targetType || 'Structure';
     const institutional = signal.institutional || {};
     const premiumLabel = signal.premiumLabel || '🛡️ ELITE';
-    const strengthEmoji = score >= 82 ? '💎' : '🔥';
+    const strengthEmoji = score >= 82 ? '💎' : '🚀';
     const signalEmoji = action === 'BUY' ? '🟢' : '🔴';
 
     const regime = institutional.regime || 'Unknown';
@@ -59,33 +60,64 @@ export async function sendSignalAlert(signal) {
     const vwapBias = institutional.vwapBias || 'Neutral';
     const orderbookLabel = institutional.orderbook?.label || 'Neutral';
     const breakoutProb = institutional.breakoutProb || 0;
-    const mtfConfirmation = signal.mtfConfirmation ? `\n✅ MTF Confirmed: <b>${signal.mtfConfirmation}</b>` : '';
+    const roadmap = signal.mtfRoadmap;
 
-    const formattedPrice = `$${Number(price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}`;
-    const formattedSL = `$${Number(stopLoss).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}`;
-    const formattedTP = `$${Number(target).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}`;
+    // MTF Confirmation text
+    const mtfConfirmed = roadmap ? 'YES' : 'NO';
+    const mtfDetails = roadmap ?
+        `\n• 4H: <b>${roadmap.h4}</b> | 1H: <b>${roadmap.h1}</b> | 15M: <b>${roadmap.m15}</b>` : '';
+
+    // Date & Time formatting
+    const signalDate = new Date(timestamp || Date.now());
+    const dateStr = signalDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const timeStr = signalDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) + ' IST';
+
+    // Pricing formatting (Smart decimals)
+    const formatPrice = (p) => {
+        const num = Number(p);
+        return num.toLocaleString('en-US', {
+            minimumFractionDigits: num < 1 ? 4 : 2,
+            maximumFractionDigits: num < 1 ? 8 : 2
+        });
+    };
+
+    const formattedPrice = formatPrice(price);
+    const formattedSL = formatPrice(stopLoss);
+    const formattedTP1 = formatPrice(target);
+    const formattedTP2 = formatPrice(target2);
+
+    // Potential Profit calculation
+    const potentialProfit = Math.abs(target - price).toLocaleString('en-US', {
+        minimumFractionDigits: price < 1 ? 4 : 2,
+        maximumFractionDigits: price < 1 ? 8 : 2
+    });
 
     const message = `
-${strengthEmoji} <b>TREADING AI — ${premiumLabel}</b>
+${strengthEmoji} <b>TREADING AI — ${premiumLabel} SIGNAL</b>
 
-🎯 Symbol: <b>${symbol.toUpperCase()}</b>
-${signalEmoji} Direction: <b>${action.toUpperCase()}</b>
-🔥 Score: <b>${score}%</b>
-💪 Strength: <b>${strengthLabel}</b>
+🪙 Symbol: <b>${symbol.toUpperCase()}</b>
+📊 Direction: <b>${action.toUpperCase()}</b>
+🔥 Confidence: <b>${score}%</b>
 
-💰 Entry:   <b>${formattedPrice}</b>
-🛡️ Stop Loss: <b>${formattedSL}</b>
-🏁 Target:  <b>${formattedTP}</b>
+💰 Entry Price: <b>${formattedPrice}</b>
+🎯 Target 1: <b>${formattedTP1}</b>
+🎯 Target 2: <b>${formattedTP2}</b>
 
-📍 Target Type: <i>${targetType || 'Structure'}</i>
-📈 Breakout Prob: <b>${breakoutProb}%</b>
-🌊 VWAP Bias: <b>${vwapBias}</b>
-📊 Orderbook: <b>${orderbookLabel}</b>
-🗺️ Regime: <b>${regime}</b>
-⏰ Session: <b>${session}</b>${mtfConfirmation}
+🛡 Stop Loss: <b>${formattedSL}</b>
+💵 Potential Profit: <b>+${potentialProfit}</b>
 
-⏱ Timeframe: <i>${timeframe}</i>
-🤖 <i>Elite Algorithmic Scanner v2.0</i>
+📈 Risk/Reward: <b>${riskReward}</b>
+
+⏰ Timeframe: <b>${timeframe}</b>
+🧠 MTF Confirmation: <b>${mtfConfirmed}</b>${mtfDetails}
+
+📅 Date: <b>${dateStr}</b>
+🕒 Time: <b>${timeStr}</b>
+
+⚡ Valid for: <b>15 minutes</b>
+📍 Target Type: <i>${targetType}</i>
+🌊 Bias: <i>${vwapBias}</i> | 🗺️ Regime: <i>${regime}</i>
+🤖 <i>Elite Algorithmic Scanner v2.1</i>
 `;
 
     await sendMessage(message);

@@ -8,8 +8,9 @@ import axios from 'axios';
 const BINANCE_BASE = 'https://api.binance.com/api/v3';
 const BINANCE_FUTURES_BASE = 'https://fapi.binance.com/fapi/v1';
 
-// Stablecoins to ignore for scanning
+// Stablecoins and risky/meme coins to ignore for scanning
 const STABLECOINS = ['USDC', 'FDUSD', 'TUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'BUSD', 'AEUR', 'ZAR', 'USDS'];
+const BLACKLIST = ['SHIB', 'PEPE', 'FLOKI', 'MEME', 'BONK', 'WIF', 'LUNC', 'USTC', 'BTTC'];
 
 const DATA_API_BASE = 'https://data-api.binance.vision/api/v3';
 
@@ -29,7 +30,7 @@ export async function getCandles(symbol, interval = '15m', limit = 300) {
         try {
             const res = await axios.get(url, {
                 params: { symbol, interval, limit },
-                timeout: 8000
+                timeout: 12000
             });
 
             if (res.data && Array.isArray(res.data)) {
@@ -109,7 +110,8 @@ export async function getTopVolumeSymbols(limit = 50) {
             .filter(t => {
                 const isUSDT = t.symbol.endsWith('USDT');
                 const isStable = STABLECOINS.some(s => t.symbol.includes(s));
-                return isUSDT && !isStable;
+                const isBlacklisted = BLACKLIST.some(b => t.symbol.includes(b));
+                return isUSDT && !isStable && !isBlacklisted;
             })
             .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
             .slice(0, limit)

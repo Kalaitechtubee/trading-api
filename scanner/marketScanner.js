@@ -11,14 +11,15 @@ const MIN_SCORE_TO_ALERT = 75; // Increased to 75
 const PREMIUM_SIGNAL_THRESHOLD = 82; // Elite level
 const MIN_SCORE_TO_STORE = 55;
 
-// Professional Scalping Symbols (High Liquidity / Quality)
+// Professional Scalping Symbols (High Liquidity / Quality Fallback)
 const SYMBOLS = [
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
-    'ADAUSDT', 'DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'POLUSDT'
+    'ADAUSDT', 'DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'POLUSDT',
+    'TRXUSDT', 'LTCUSDT', 'DOTUSDT', 'MATICUSDT', 'ATOMUSDT'
 ];
 
-// Scalping + Intraday Timeframes: 5m (Entry), 15m (Setup), 1h (Trend)
-const TIMEFRAMES = ['5m', '15m', '1h'];
+// Scalping + Intraday Timeframes: 5m (Entry), 15m (Setup), 1h (Structure), 4h (Trend Bias)
+const TIMEFRAMES = ['5m', '15m', '1h', '4h'];
 
 // Alert cooldown map: symbol_timeframe → last alert timestamp
 const alertCooldown = new Map();
@@ -124,14 +125,29 @@ export async function scanMarket() {
     try {
         const allResults = [];
 
-        // Parallel scanning for all symbols
-        const scanPromises = SYMBOLS.map(async (symbol) => {
-            const tfResults = await Promise.all(TIMEFRAMES.map(tf => scanSymbol(symbol, tf)));
-            allResults.push(...tfResults.filter(r => r !== null));
-            await new Promise(r => setTimeout(r, 200));
-        });
+        // ── Dynamic Symbols Discovery ─────────────────────────────
+        // Fetch top volume symbols from Binance to ensure we scan the most active markets
+        let activeSymbols = SYMBOLS;
+        try {
+            const topVol = await getTopVolumeSymbols(15);
+            if (topVol && topVol.length > 0) activeSymbols = topVol;
+        } catch (e) {
+            console.warn('[Scanner] Failed to fetch dynamic symbols, falling back to static list');
+        }
 
-        await Promise.all(scanPromises);
+        // Sequential scanning for all symbols (Avoids API bursts/timeouts)
+        for (const symbol of activeSymbols) {
+            try {
+                // Timeframes can still be parallel for a single symbol
+                const tfResults = await Promise.all(TIMEFRAMES.map(tf => scanSymbol(symbol, tf)));
+                allResults.push(...tfResults.filter(r => r !== null));
+
+                // Small gap between symbols
+                await new Promise(r => setTimeout(r, 400)); // Slightly faster scan
+            } catch (err) {
+                console.error(`[Scanner] Symbol loop error for ${symbol}:`, err.message);
+            }
+        }
 
         // ── ELITE SIGNAL FILTERING ──
         // 1. Filter candidates (Score >= 75 and not WAIT)
@@ -145,24 +161,32 @@ export async function scanMarket() {
 
             const m5 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '5m');
             const m15 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '15m');
+            const h1 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '1h');
+            const h4 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '4h');
 
-            if (m5 && m15) {
-                const isBullishSetup = (m5.action.includes('BUY') && m15.score >= 60);
-                const isBearishSetup = (m5.action.includes('SELL') && m15.score <= 40);
+            if (m5 && m15 && h1 && h4) {
+                // Hierarchical Bias Logic (Fixed for Symmetric Scoring)
+                const isBullishSetup = (m5.action === 'BUY' && m15.bias === 'Bullish' && h1.bias === 'Bullish' && h4.bias !== 'Bearish');
+                const isBearishSetup = (m5.action === 'SELL' && m15.bias === 'Bearish' && h1.bias !== 'Bullish' && h4.bias !== 'Bullish');
 
                 if (isBullishSetup || isBearishSetup) {
                     if (canAlert(`${sig.symbol}_ELITE`)) {
-                        // Prioritize the timeframe with the stronger action for the alert details
-                        const alertSig = (m5.score >= m15.score || m15.action === 'WAIT') ? m5 : m15;
-
                         eliteSignals.push({
-                            ...alertSig,
+                            ...m5,
                             isElite: true,
-                            mtfConfirmed: true,
-                            mtfScore: Math.round((m5.score + m15.score) / 2)
+                            mtfConfirmation: 'Strong',
+                            mtfScore: Math.round((m5.score * 0.4) + (m15.score * 0.3) + (h1.score * 0.2) + (h4.score * 0.1)),
+                            mtfRoadmap: {
+                                h4: h4.bias,
+                                h1: h1.bias,
+                                m15: m15.bias
+                            }
                         });
                         processedSymbols.add(sig.symbol);
                     }
+                } else {
+                    // Detailed Log for Why it Failed
+                    console.log(`[Scanner] ${sig.symbol.padStart(8)} → MTF Rejected: 4H(${h4.bias}), 1H(${h1.bias}), 15M(${m15.bias}) vs 5M(${sig.action})`);
                 }
             }
         }
@@ -176,7 +200,7 @@ export async function scanMarket() {
             const premiumLabel = elite.score >= PREMIUM_SIGNAL_THRESHOLD ? '👑 PREMIUM' : '🚀 ELITE';
             await sendSignalAlert({ ...elite, premiumLabel });
             alertCooldown.set(`${elite.symbol}_ELITE`, Date.now());
-            console.log(`[Scanner] ${premiumLabel} alert sent: ${elite.symbol} ${elite.action} at ${elite.score}% (MTF Confirmed)`);
+            console.log(`[Scanner] 🔥 ${premiumLabel} ALERT SENT: ${elite.symbol} ${elite.action} (MTF Aligned 4H/1H/15M/5M)`);
         }
 
     } catch (err) {
@@ -184,7 +208,7 @@ export async function scanMarket() {
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[Scanner] ═══ Scan #${scanCount} complete in ${elapsed}s (Top 10 Coins / 3 TFs) ═══\n`);
+    console.log(`[Scanner] ═══ Scan #${scanCount} complete in ${elapsed}s (Top 15 Active Markets / 4 TFs) ═══\n`);
     isScanning = false;
 }
 

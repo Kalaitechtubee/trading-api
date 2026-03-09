@@ -26,9 +26,9 @@ async function testBot() {
             breakoutProb: 88
         },
         mtfRoadmap: {
-            h4: 'Bullish',
             h1: 'Bullish',
-            m15: 'Bullish'
+            m15: 'Bullish',
+            m5: 'BUY'
         }
     };
 

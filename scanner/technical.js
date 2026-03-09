@@ -591,7 +591,7 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     if (spread > 0.002) finalAction = 'WAIT';
 
     // 4. Volume & Score Confirmation
-    if (!isVolumeSpike && adjustedProb < 80 && finalAction !== 'WAIT') {
+    if (!isVolumeSpike && adjustedProb < 75 && finalAction !== 'WAIT') {
         finalAction = 'WAIT';
     }
 

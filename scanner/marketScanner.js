@@ -7,7 +7,7 @@ import { getCachedCandles, updateCandles } from '../memory/candleStore.js';
 
 // ── Configuration ────────────────────────────────────────────
 // Minimum score to store and alert on
-const MIN_SCORE_TO_ALERT = 75; // Increased to 75
+const MIN_SCORE_TO_ALERT = 72; // Slightly relaxed to catch more quality signals
 const PREMIUM_SIGNAL_THRESHOLD = 82; // Elite level
 const MIN_SCORE_TO_STORE = 55;
 
@@ -18,8 +18,16 @@ const SYMBOLS = [
     'TRXUSDT', 'LTCUSDT', 'DOTUSDT', 'MATICUSDT', 'ATOMUSDT'
 ];
 
-// Scalping + Intraday Timeframes: 5m (Entry), 15m (Setup), 1h (Structure), 4h (Trend Bias)
-const TIMEFRAMES = ['5m', '15m', '1h', '4h'];
+// ✅ Whitelist: Only high-liquidity, institutional-grade coins
+// Blocks low-quality coins like BANANAS31USDT, SIGNUSDT, OPNUSDT etc.
+const ALLOWED = [
+    'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+    'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'LINKUSDT', 'TRXUSDT',
+    'LTCUSDT', 'ATOMUSDT', 'DOTUSDT', 'SUIUSDT', 'MATICUSDT'
+];
+
+// Scalping + Intraday Timeframes: 5m (Entry), 15m (Setup), 1h (Structure/Trend Bias)
+const TIMEFRAMES = ['5m', '15m', '1h'];
 
 // Alert cooldown map: symbol_timeframe → last alert timestamp
 const alertCooldown = new Map();
@@ -94,9 +102,9 @@ async function scanSymbol(symbol, timeframe) {
         // Always store scan results so the React UI always has data
         addSignal(result);
 
-        if (result.score >= MIN_SCORE_TO_STORE) {
-            console.log(`[Scanner] ${symbol.padStart(8)} ${timeframe.padStart(3)} → ${result.action.padEnd(6)} (${result.score}%) [${result.strengthLabel}]`);
-        }
+        // Log every scan so user can see all coins being processed
+        const emoji = result.action === 'BUY' ? '🟢' : result.action === 'SELL' ? '🔴' : '⚪';
+        console.log(`[Scanner] ${emoji} ${symbol.padStart(8)} ${timeframe.padStart(3)} → ${result.action.padEnd(6)} (${result.score}%) [${result.strengthLabel}]`);
 
         return result;
 
@@ -130,7 +138,11 @@ export async function scanMarket() {
         let activeSymbols = SYMBOLS;
         try {
             const topVol = await getTopVolumeSymbols(15);
-            if (topVol && topVol.length > 0) activeSymbols = topVol;
+            if (topVol && topVol.length > 0) {
+                // ✅ Filter to only whitelisted high-liquidity coins
+                const filtered = topVol.filter(s => ALLOWED.includes(s));
+                activeSymbols = filtered.length > 0 ? filtered : SYMBOLS;
+            }
         } catch (e) {
             console.warn('[Scanner] Failed to fetch dynamic symbols, falling back to static list');
         }
@@ -162,12 +174,11 @@ export async function scanMarket() {
             const m5 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '5m');
             const m15 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '15m');
             const h1 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '1h');
-            const h4 = allResults.find(r => r.symbol === sig.symbol && r.timeframe === '4h');
 
-            if (m5 && m15 && h1 && h4) {
-                // Hierarchical Bias Logic (Fixed for Symmetric Scoring)
-                const isBullishSetup = (m5.action === 'BUY' && m15.bias === 'Bullish' && h1.bias === 'Bullish' && h4.bias !== 'Bearish');
-                const isBearishSetup = (m5.action === 'SELL' && m15.bias === 'Bearish' && h1.bias !== 'Bullish' && h4.bias !== 'Bullish');
+            if (m5 && m15 && h1) {
+                // Scalping MTF: 5m entry must align with 15m + 1h bias
+                const isBullishSetup = (m5.action === 'BUY' && m15.bias === 'Bullish' && h1.bias === 'Bullish');
+                const isBearishSetup = (m5.action === 'SELL' && m15.bias === 'Bearish' && h1.bias === 'Bearish');
 
                 if (isBullishSetup || isBearishSetup) {
                     if (canAlert(`${sig.symbol}_ELITE`)) {
@@ -175,18 +186,18 @@ export async function scanMarket() {
                             ...m5,
                             isElite: true,
                             mtfConfirmation: 'Strong',
-                            mtfScore: Math.round((m5.score * 0.4) + (m15.score * 0.3) + (h1.score * 0.2) + (h4.score * 0.1)),
+                            mtfScore: Math.round((m5.score * 0.5) + (m15.score * 0.35) + (h1.score * 0.15)),
                             mtfRoadmap: {
-                                h4: h4.bias,
                                 h1: h1.bias,
-                                m15: m15.bias
+                                m15: m15.bias,
+                                m5: m5.action
                             }
                         });
                         processedSymbols.add(sig.symbol);
                     }
                 } else {
                     // Detailed Log for Why it Failed
-                    console.log(`[Scanner] ${sig.symbol.padStart(8)} → MTF Rejected: 4H(${h4.bias}), 1H(${h1.bias}), 15M(${m15.bias}) vs 5M(${sig.action})`);
+                    console.log(`[Scanner] ${sig.symbol.padStart(8)} → MTF Rejected: 1H(${h1.bias}), 15M(${m15.bias}) vs 5M(${sig.action})`);
                 }
             }
         }
@@ -200,7 +211,7 @@ export async function scanMarket() {
             const premiumLabel = elite.score >= PREMIUM_SIGNAL_THRESHOLD ? '👑 PREMIUM' : '🚀 ELITE';
             await sendSignalAlert({ ...elite, premiumLabel });
             alertCooldown.set(`${elite.symbol}_ELITE`, Date.now());
-            console.log(`[Scanner] 🔥 ${premiumLabel} ALERT SENT: ${elite.symbol} ${elite.action} (MTF Aligned 4H/1H/15M/5M)`);
+            console.log(`[Scanner] 🔥 ${premiumLabel} ALERT SENT: ${elite.symbol} ${elite.action} (MTF Aligned 1H/15M/5M)`);
         }
 
     } catch (err) {

@@ -6,8 +6,20 @@
 import express from 'express';
 import { getSignals, getFilteredSignals, getTopSignals, getScannerStatus } from '../memory/signalStore.js';
 import { getScannerInfo } from '../scanner/marketScanner.js';
+import { getBacktestStats } from '../memory/backtestStore.js';
 
 const router = express.Router();
+
+/**
+ * GET /api/signals/backtest
+ * Returns backtest stats and trade history
+ */
+router.get('/backtest', (req, res) => {
+    res.json({
+        success: true,
+        stats: getBacktestStats()
+    });
+});
 
 /**
  * GET /api/signals

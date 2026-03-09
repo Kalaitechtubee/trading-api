@@ -65,7 +65,7 @@ export async function sendSignalAlert(signal) {
     // MTF Confirmation text
     const mtfConfirmed = roadmap ? 'YES' : 'NO';
     const mtfDetails = roadmap ?
-        `\n• 4H: <b>${roadmap.h4}</b> | 1H: <b>${roadmap.h1}</b> | 15M: <b>${roadmap.m15}</b>` : '';
+        `\n• 1H: <b>${roadmap.h1}</b> | 15M: <b>${roadmap.m15}</b> | 5M: <b>${roadmap.m5}</b>` : '';
 
     // Date & Time formatting
     const signalDate = new Date(timestamp || Date.now());

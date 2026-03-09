@@ -430,7 +430,7 @@ export function getTradeSignal(score) {
 // ═══════════════════════════════════════════════════════════════
 
 export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', futuresData = null) {
-    if (!candles || candles.length < 20) return { error: 'Insufficient data' };
+    if (!candles || candles.length < 200) return { error: `Insufficient data: ${candles?.length ?? 0} candles (need 200)` };
 
     const currentPrice = candles[candles.length - 1].close;
     const prices = candles.map(c => c.close);
@@ -560,7 +560,8 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
 
     // ── SIGNAL DECISION ──
     let finalAction = 'WAIT';
-    let adjustedProb = 50;
+    // Always show the dominant direction score (not flat 50) so scanner is informative
+    let adjustedProb = Math.max(bullishProb, bearishProb);
 
     if (bullishProb > bearishProb && bullishProb >= trendThreshold) {
         finalAction = 'BUY';
@@ -570,9 +571,9 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
         adjustedProb = bearishProb;
     }
 
-    // ── Trend Strength Detection ──
+    // ── Trend Strength Detection (lowered from 15 → 10 for scalping) ──
     const trendStrength = Math.abs(bullishProb - bearishProb);
-    if (trendStrength < 15) {
+    if (trendStrength < 10) {
         finalAction = 'WAIT';
     }
 
@@ -590,8 +591,8 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     // 3. Orderbook Spread Filter
     if (spread > 0.002) finalAction = 'WAIT';
 
-    // 4. Volume & Score Confirmation
-    if (!isVolumeSpike && adjustedProb < 75 && finalAction !== 'WAIT') {
+    // 4. Volume & Score Confirmation (relaxed to 70 to avoid over-filtering)
+    if (!isVolumeSpike && adjustedProb < 70 && finalAction !== 'WAIT') {
         finalAction = 'WAIT';
     }
 

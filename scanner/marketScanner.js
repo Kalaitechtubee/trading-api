@@ -4,6 +4,7 @@ import { addSignal } from '../memory/signalStore.js';
 import { runAIAnalysis } from './technical.js';
 import { ATR } from 'technicalindicators';
 import { getCachedCandles, updateCandles } from '../memory/candleStore.js';
+import { recordTrade, updateTradeStatus } from '../memory/backtestStore.js';
 
 // ── Configuration ────────────────────────────────────────────
 // Minimum score to store and alert on
@@ -11,19 +12,20 @@ const MIN_SCORE_TO_ALERT = 72; // Slightly relaxed to catch more quality signals
 const PREMIUM_SIGNAL_THRESHOLD = 82; // Elite level
 const MIN_SCORE_TO_STORE = 55;
 
-// Professional Scalping Symbols (High Liquidity / Quality Fallback)
+// Professional Scalping Symbols (High Liquidity)
 const SYMBOLS = [
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
     'ADAUSDT', 'DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'POLUSDT',
-    'TRXUSDT', 'LTCUSDT', 'DOTUSDT', 'MATICUSDT', 'ATOMUSDT'
+    'TRXUSDT', 'LTCUSDT', 'DOTUSDT', 'MATICUSDT', 'ATOMUSDT',
+    'SUIUSDT', 'APTUSDT', 'NEARUSDT', 'ARBUSDT', 'OPUSDT'
 ];
 
 // ✅ Whitelist: Only high-liquidity, institutional-grade coins
-// Blocks low-quality coins like BANANAS31USDT, SIGNUSDT, OPNUSDT etc.
 const ALLOWED = [
     'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
     'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'LINKUSDT', 'TRXUSDT',
-    'LTCUSDT', 'ATOMUSDT', 'DOTUSDT', 'SUIUSDT', 'MATICUSDT'
+    'LTCUSDT', 'ATOMUSDT', 'DOTUSDT', 'SUIUSDT', 'MATICUSDT',
+    'APTUSDT', 'NEARUSDT', 'ARBUSDT', 'OPUSDT', 'POLUSDT'
 ];
 
 // Scalping + Intraday Timeframes: 5m (Entry), 15m (Setup), 1h (Structure/Trend Bias)
@@ -53,9 +55,9 @@ async function scanSymbol(symbol, timeframe) {
         // ── Candle Cache System ───────────────────────────────────
         let candles = getCachedCandles(symbol, timeframe);
 
-        // If not in cache or very stale, fetch full history (300)
-        // Otherwise fetch just enough to catch up (e.g. 5)
-        const fetchCount = (!candles || candles.length < 5) ? 300 : 5;
+        // Always fetch 300 candles if cache is below 200 (EMA200 needs 200+ candles)
+        // Otherwise top up with last 20 to stay current
+        const fetchCount = (!candles || candles.length < 200) ? 300 : 20;
 
         const freshCandles = await getCandles(symbol, timeframe, fetchCount);
         if (!freshCandles || freshCandles.length === 0) {
@@ -67,7 +69,14 @@ async function scanSymbol(symbol, timeframe) {
         updateCandles(symbol, timeframe, freshCandles);
         candles = getCachedCandles(symbol, timeframe);
 
-        if (!candles || candles.length < 50) return null;
+        // Debug: log candle count so we can confirm indicators have enough data
+        console.log(`[Cache]   ${symbol.padStart(8)} ${timeframe.padStart(3)} → ${candles.length} candles loaded`);
+
+        // EMA200 needs at least 200 candles — skip if insufficient
+        if (!candles || candles.length < 200) {
+            console.log(`[Scanner] Skipping ${symbol} ${timeframe}: only ${candles?.length} candles (need 200)`);
+            return null;
+        }
 
         // ── Volatility Filter ─────────────────────────────────────
         const close = candles.map(c => c.close);
@@ -102,6 +111,12 @@ async function scanSymbol(symbol, timeframe) {
         // Always store scan results so the React UI always has data
         addSignal(result);
 
+        // Update backtest tracker with latest price for this symbol
+        // (Only need to do this once per symbol, e.g. on 5m)
+        if (timeframe === '5m') {
+            updateTradeStatus(symbol, result.price);
+        }
+
         // Log every scan so user can see all coins being processed
         const emoji = result.action === 'BUY' ? '🟢' : result.action === 'SELL' ? '🔴' : '⚪';
         console.log(`[Scanner] ${emoji} ${symbol.padStart(8)} ${timeframe.padStart(3)} → ${result.action.padEnd(6)} (${result.score}%) [${result.strengthLabel}]`);
@@ -133,19 +148,12 @@ export async function scanMarket() {
     try {
         const allResults = [];
 
-        // ── Dynamic Symbols Discovery ─────────────────────────────
-        // Fetch top volume symbols from Binance to ensure we scan the most active markets
-        let activeSymbols = SYMBOLS;
-        try {
-            const topVol = await getTopVolumeSymbols(15);
-            if (topVol && topVol.length > 0) {
-                // ✅ Filter to only whitelisted high-liquidity coins
-                const filtered = topVol.filter(s => ALLOWED.includes(s));
-                activeSymbols = filtered.length > 0 ? filtered : SYMBOLS;
-            }
-        } catch (e) {
-            console.warn('[Scanner] Failed to fetch dynamic symbols, falling back to static list');
-        }
+        // ✅ Use static whitelist only — avoids garbage coins like BANANAS31USDT, SIGNUSDT
+        // Dynamic discovery disabled: low-liquidity coins return insufficient candle data
+        // causing all indicators to fall back to default 50% score
+        const activeSymbols = SYMBOLS;
+        console.log(`[Scanner] Scanning ${activeSymbols.length} whitelisted symbols: ${activeSymbols.join(', ')}`);
+
 
         // Sequential scanning for all symbols (Avoids API bursts/timeouts)
         for (const symbol of activeSymbols) {
@@ -210,6 +218,10 @@ export async function scanMarket() {
         for (const elite of topElites) {
             const premiumLabel = elite.score >= PREMIUM_SIGNAL_THRESHOLD ? '👑 PREMIUM' : '🚀 ELITE';
             await sendSignalAlert({ ...elite, premiumLabel });
+
+            // Record in backtest tracker
+            recordTrade(elite);
+
             alertCooldown.set(`${elite.symbol}_ELITE`, Date.now());
             console.log(`[Scanner] 🔥 ${premiumLabel} ALERT SENT: ${elite.symbol} ${elite.action} (MTF Aligned 1H/15M/5M)`);
         }
@@ -219,7 +231,7 @@ export async function scanMarket() {
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[Scanner] ═══ Scan #${scanCount} complete in ${elapsed}s (Top 15 Active Markets / 4 TFs) ═══\n`);
+    console.log(`[Scanner] ═══ Scan #${scanCount} complete in ${elapsed}s (Top 20 Active Markets / 3 TFs) ═══\n`);
     isScanning = false;
 }
 

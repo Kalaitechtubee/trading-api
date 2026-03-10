@@ -77,6 +77,19 @@ app.listen(PORT, () => {
   📡 Telegram alerts    → ${process.env.TELEGRAM_TOKEN ? 'Enabled ✅' : 'Disabled ⚠️ (set TELEGRAM_TOKEN)'}
 `);
 
+    // ── Render/Production Check ─────────────────────────────────
+    const missingVars = [];
+    if (!process.env.TELEGRAM_TOKEN) missingVars.push('TELEGRAM_TOKEN');
+    if (!process.env.TELEGRAM_CHAT) missingVars.push('TELEGRAM_CHAT');
+    if (!process.env.FOREX_API_KEY) missingVars.push('FOREX_API_KEY');
+
+    if (missingVars.length > 0) {
+        console.error(`\n❌ CRITICAL: Missing Environment Variables: ${missingVars.join(', ')}`);
+        console.error(`⚠️  The scanner will NOT send signals correctly on Render without these set manually in the Dashboard.\n`);
+    } else {
+        console.log('✅ All environment variables verified. Scanner is ready.');
+    }
+
     // ── Run initial scan immediately on startup ──────────────
     console.log('[Server] Running initial market scan...');
     scanMarket();

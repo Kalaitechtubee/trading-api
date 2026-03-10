@@ -46,7 +46,7 @@ export async function sendSignalAlert(signal) {
     const {
         symbol, action, score, price,
         stopLoss, target, target2, riskReward, timeframe, strengthLabel,
-        timestamp, expiresAt
+        timestamp, expiresAt, marketType
     } = signal;
 
     const targetType = signal.targetType || 'Structure';
@@ -96,6 +96,7 @@ export async function sendSignalAlert(signal) {
 ${strengthEmoji} <b>TREADING AI — ${premiumLabel} SIGNAL</b>
 
 🪙 Symbol: <b>${symbol.toUpperCase()}</b>
+🏛️ Market: <b>${marketType ? marketType.toUpperCase() : 'CRYPTO'}</b>
 📊 Direction: <b>${action.toUpperCase()}</b>
 🔥 Confidence: <b>${score}%</b>
 
@@ -134,7 +135,7 @@ export async function sendTopSignalsSummary(signals) {
     const body = signals
         .slice(0, 5)
         .map((s, i) =>
-            `${i + 1}️⃣ <b>${s.symbol}</b> ${s.action.includes('BUY') ? '🟢' : '🔴'} ${s.action} — <b>${s.score}%</b>\nPrice: ${s.price} | Target: ${s.target?.toFixed(4)}`
+            `${i + 1}️⃣ <b>${s.symbol}</b> [${s.marketType?.toUpperCase() || 'CRYPTO'}] ${s.action.includes('BUY') ? '🟢' : '🔴'} ${s.action} — <b>${s.score}%</b>\nPrice: ${s.price} | Target: ${s.target?.toFixed(4)}`
         )
         .join('\n\n');
 

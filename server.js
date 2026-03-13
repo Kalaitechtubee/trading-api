@@ -9,6 +9,10 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { scanMarket } from './scanner/marketScanner.js';
 import signalRoutes from './routes/signals.js';
+import cron from 'node-cron';
+import { sendDailyReport } from './services/telegramService.js';
+
+import scannerConfig from './config/scannerConfig.js';
 
 // Load environment variables from backend/.env
 dotenv.config();
@@ -17,8 +21,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // ── Scan interval (milliseconds) ─────────────────────────────
-// 60000 = scan every 1 minute
-const SCAN_INTERVAL_MS = parseInt(process.env.SCAN_INTERVAL_MS) || 60000;
+const SCAN_INTERVAL_MS = parseInt(process.env.SCAN_INTERVAL_MS) || scannerConfig.scanIntervalMs;
 
 // ── Middleware ────────────────────────────────────────────────
 app.use(cors({
@@ -96,6 +99,15 @@ app.listen(PORT, () => {
 
     // ── Schedule recurring scans ──────────────────────────── 
     setInterval(scanMarket, SCAN_INTERVAL_MS);
+
+    // ── Schedule Daily Telegram Report (23:00 IST) ─────────
+    cron.schedule('0 23 * * *', () => {
+        console.log('[Cron] Triggering daily performance report...');
+        sendDailyReport();
+    }, {
+        scheduled: true,
+        timezone: "Asia/Kolkata"
+    });
 });
 
 // ── Graceful shutdown ─────────────────────────────────────────

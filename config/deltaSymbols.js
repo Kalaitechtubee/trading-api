@@ -1,0 +1,20 @@
+export default [
+  "BTCUSDT",
+  "ETHUSDT",
+  "SOLUSDT",
+  "BNBUSDT",
+  "XRPUSDT",
+  "ADAUSDT",
+  "DOGEUSDT",
+  "AVAXUSDT",
+  "LINKUSDT",
+  "DOTUSDT",
+  "MATICUSDT",
+  "LTCUSDT",
+  "TRXUSDT",
+  "ATOMUSDT",
+  "NEARUSDT",
+  "APTUSDT",
+  "SUIUSDT",
+  "POLUSDT"
+];

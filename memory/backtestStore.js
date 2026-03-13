@@ -40,8 +40,17 @@ export function recordTrade(signal) {
     // Only record BUY/SELL signals
     if (signal.action === 'WAIT') return;
 
+    // Prevention: Don't record duplicate if same symbol/TF is already pending
+    const isAlreadyPending = trades.some(t => 
+        t.symbol === signal.symbol && 
+        t.timeframe === signal.timeframe && 
+        t.status === 'PENDING'
+    );
+
+    if (isAlreadyPending) return;
+
     const trade = {
-        id: `T-${Date.now()}-${signal.symbol}`,
+        id: `T-${Date.now()}-${signal.symbol}-${signal.timeframe}`,
         symbol: signal.symbol,
         action: signal.action,
         entryPrice: signal.price,
@@ -58,7 +67,7 @@ export function recordTrade(signal) {
 
     trades.push(trade);
     saveTrades();
-    console.log(`[BacktestStore] 📝 Recorded Pending Trade: ${signal.symbol} ${signal.action} @ ${signal.price}`);
+    console.log(`[BacktestStore] 📝 Recorded Pending Trade: ${signal.symbol} ${signal.action} (${signal.timeframe}) @ ${signal.price}`);
 }
 
 /**
@@ -128,8 +137,40 @@ export function getBacktestStats() {
     const losses = closed.filter(t => t.status === 'LOSS').length;
     const winRate = closed.length > 0 ? (wins / closed.length) * 100 : 0;
 
-    // Calculate total RR
-    // RR = (TP - Entry) / (Entry - SL)
+    // Advanced Stats
+    const statsByHour = {};
+    const statsBySymbol = {};
+    const statsByTimeframe = {};
+
+    closed.forEach(t => {
+        const hour = new Date(t.timestamp).getUTCHours();
+        const symbol = t.symbol;
+        const tf = t.timeframe;
+
+        // Hour stats
+        if (!statsByHour[hour]) statsByHour[hour] = { wins: 0, total: 0 };
+        statsByHour[hour].total++;
+        if (t.status === 'WIN') statsByHour[hour].wins++;
+
+        // Symbol stats
+        if (!statsBySymbol[symbol]) statsBySymbol[symbol] = { wins: 0, total: 0 };
+        statsBySymbol[symbol].total++;
+        if (t.status === 'WIN') statsBySymbol[symbol].wins++;
+
+        // Timeframe stats
+        if (!statsByTimeframe[tf]) statsByTimeframe[tf] = { wins: 0, total: 0 };
+        statsByTimeframe[tf].total++;
+        if (t.status === 'WIN') statsByTimeframe[tf].wins++;
+    });
+
+    const formatBreakdown = (obj) => {
+        const result = {};
+        Object.keys(obj).forEach(key => {
+            const wr = (obj[key].wins / obj[key].total * 100).toFixed(1);
+            result[key] = `${wr}% (${obj[key].wins}/${obj[key].total})`;
+        });
+        return result;
+    };
 
     return {
         totalTrades: trades.length,
@@ -139,7 +180,10 @@ export function getBacktestStats() {
         winRate: winRate.toFixed(1) + '%',
         totalProfit: closed.reduce((sum, t) => sum + (t.profit || 0), 0).toFixed(4),
         pending: trades.filter(t => t.status === 'PENDING').length,
-        history: trades.slice(-50) // Last 50 trades
+        breakdownByHour: formatBreakdown(statsByHour),
+        breakdownBySymbol: formatBreakdown(statsBySymbol),
+        breakdownByTimeframe: formatBreakdown(statsByTimeframe),
+        history: trades.slice(-50)
     };
 }
 

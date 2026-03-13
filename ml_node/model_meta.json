@@ -1,0 +1,22 @@
+{
+  "version": "node-v1.0",
+  "accuracy_avg": 0.6196666666666667,
+  "trained_at": "2026-03-13T07:45:57.959Z",
+  "n_samples": 7790,
+  "features": [
+    "price",
+    "rsi",
+    "macd_histogram",
+    "volume_spike",
+    "atr_pct",
+    "ema_trend",
+    "orderbook_imbalance",
+    "liquidity_sweep",
+    "regime",
+    "session",
+    "bos",
+    "whale_dominance",
+    "delta_ratio",
+    "cluster_score"
+  ]
+}

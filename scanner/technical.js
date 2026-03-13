@@ -6,19 +6,28 @@
  *
  * Uses the `technicalindicators` npm package (same as frontend).
  *
- * WEIGHT DISTRIBUTION:
+ * WEIGHT DISTRIBUTION (v2 — Smart Money Edition):
  *  1. Market Structure (HH/HL/LH/LL)  → 25%
- *  2. Support / Resistance Zones       → 20%
- *  3. Volume Flow / Profile            → 15%
- *  4. Liquidity Sweeps / EQH / EQL    → 15%
- *  5. Momentum (RSI + MACD)            → 10%
- *  6. Volatility / ATR                 → 10%
- *  7. VWAP Bias                        → 5%
- *  8. Orderbook Imbalance              → 10%
- *  9. EMA 200 Trend Alignment         → Required for Elites
+ *  2. Liquidity Zones + Clusters       → 20%
+ *  3. Volume Flow / Orderflow Delta    → 15%
+ *  4. Momentum (RSI + MACD)            → 10%
+ *  5. Support / Resistance             → 10%
+ *  6. Orderbook Imbalance + Whales     → 10%
+ *  7. Smart Money (BOS + OB)           → 10%
+ *  8. ML Prediction (Bonus)            → +8 bonus pts if > 70%
+ *  9. VWAP / EMA 200                   → Filter / Required
  */
 
-import { EMA, ATR, RSI, MACD, VWAP } from 'technicalindicators';
+import { EMA, ATR, RSI, MACD, VWAP, ADX } from 'technicalindicators';
+import {
+    detectLiquidityClusters,
+    detectWhales,
+    detectBOS,
+    calculateOrderflow,
+    getMLPrediction,
+    buildMLFeatures
+} from './smartMoney.js';
+import riskConfig from '../config/riskConfig.js';
 
 // ═══════════════════════════════════════════════════════════════
 // MODULE 1: SUPPORT / RESISTANCE
@@ -176,7 +185,20 @@ export function detectVolumeFlow(candles) {
     else if (volRatio < 0.5) { score = 50; }
 
     const label = volRatio > 1.5 ? (isBullishCandle ? 'Buy Surge' : 'Sell Surge') : 'Normal';
-    return { score: Math.min(Math.max(Math.round(score), 0), 100), label, volRatio: volRatio.toFixed(2) };
+
+    // Buy/Sell Delta (Institutional)
+    const buyVol = lastCandle.buyVolume || 0;
+    const sellVol = lastCandle.volume - buyVol;
+    const delta = buyVol - sellVol;
+    const deltaPct = lastCandle.volume > 0 ? (delta / lastCandle.volume) * 100 : 0;
+
+    return {
+        score: Math.min(Math.max(Math.round(score), 0), 100),
+        label,
+        volRatio: volRatio.toFixed(2),
+        deltaPct: deltaPct.toFixed(1) + '%',
+        isHighDelta: Math.abs(deltaPct) > 20
+    };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -316,11 +338,63 @@ export function detectMarketRegime(candles) {
 export function getSession(timestamp) {
     const date = new Date(timestamp * 1000);
     const hour = date.getUTCHours();
-    if (hour >= 8 && hour < 12) return 'LONDON';
-    if (hour >= 13 && hour < 17) return 'NEW YORK';
-    if (hour >= 0 && hour < 8) return 'ASIA';
+
+    // Updated Session Windows (UTC)
+    if (hour >= 7 && hour < 12) return 'LONDON_OPEN'; // High Volatility + Trends
+    if (hour >= 12 && hour < 16) return 'NY_OVERLAP'; // Highest Volatility
+    if (hour >= 16 && hour < 20) return 'NEW_YORK';   // Moderate Trend
+    if (hour >= 0 && hour < 7) return 'ASIA';         // Range Bound
+    if (hour >= 20 || hour < 0) return 'LATE_NY';    // Low Liquidity / Fake Moves
     return 'DORMANT';
 }
+
+/**
+ * Time-Based Volatility Analysis
+ * Calculates movement, trend probability, and range probability per hour
+ */
+export function analyzeTimeVolatility(candles) {
+    const hourlyStats = {};
+
+    candles.forEach(c => {
+        const hour = new Date(c.time * 1000).getUTCHours();
+
+        if (!hourlyStats[hour]) {
+            hourlyStats[hour] = {
+                count: 0,
+                movement: 0,
+                trendMoves: 0,
+                rangeMoves: 0
+            };
+        }
+
+        const move = Math.abs(c.close - c.open) / c.open;
+
+        hourlyStats[hour].movement += move;
+        hourlyStats[hour].count++;
+
+        // Threshold of 0.4% move is considered a "trend move" for scalping
+        if (move > 0.004) {
+            hourlyStats[hour].trendMoves++;
+        } else {
+            hourlyStats[hour].rangeMoves++;
+        }
+    });
+
+    const results = {};
+
+    Object.keys(hourlyStats).forEach(h => {
+        const s = hourlyStats[h];
+
+        results[h] = {
+            avgMove: (s.movement / s.count).toFixed(5),
+            trendRatio: (s.trendMoves / s.count * 100).toFixed(1) + '%',
+            rangeRatio: (s.rangeMoves / s.count * 100).toFixed(1) + '%'
+        };
+    });
+
+    return results;
+}
+
 
 // ═══════════════════════════════════════════════════════════════
 // INSTITUTIONAL MODULE: ORDER BLOCKS
@@ -429,7 +503,7 @@ export function getTradeSignal(score) {
 // MASTER ENGINE: runAIAnalysis
 // ═══════════════════════════════════════════════════════════════
 
-export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', futuresData = null) {
+export async function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', futuresData = null) {
     if (!candles || candles.length < 200) return { error: `Insufficient data: ${candles?.length ?? 0} candles (need 200)` };
 
     // Forex does not support orderbook, funding rate, or open interest
@@ -462,6 +536,11 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     const ema200Arr = EMA.calculate({ values: prices, period: 200 });
     const ema200 = ema200Arr[ema200Arr.length - 1];
 
+    const high = candles.map(c => c.high), low = candles.map(c => c.low);
+    const atrArr = ATR.calculate({ high, low, close: prices, period: 14 });
+    const currentATR = atrArr[atrArr.length - 1] ?? currentPrice * 0.01;
+    const atrPct = (currentATR / currentPrice) * 100;
+
     const last20 = candles.slice(-20);
     const avgVol = last20.reduce((s, c) => s + c.volume, 0) / 20;
     const isVolumeSpike = candles[candles.length - 1].volume > avgVol * 1.5;
@@ -479,6 +558,42 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     const orderbookData = calculateOrderbookImbalance(futuresData?.depth);
     const orderbookScore = orderbookData.score;
 
+    // ── SMART MONEY MODULES ──────────────────────────────────────
+    // Module SM-1: Liquidity Clusters (Heatmap)
+    const clusterData   = detectLiquidityClusters(candles);
+
+    // Module SM-2: Whale Detection
+    const whaleData     = detectWhales(futuresData?.depth || {});
+
+    // Module SM-3: Break of Structure (BOS)
+    const bosData       = detectBOS(candles, 10);
+
+    // Module SM-4: Institutional Orderflow (Volume Delta)
+    const orderflowData = calculateOrderflow(candles, 20);
+
+    // MACD histogram for ML features
+    const macdValues    = MACD.calculate({ values: prices, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false });
+    const lastMACDHist  = macdValues[macdValues.length - 1]?.histogram ?? 0;
+
+    // Module SM-5: ML Prediction
+    const mlFeatures = buildMLFeatures({
+        price: currentPrice,
+        rsi: parseFloat(rsiValues[rsiValues.length - 1] ?? 50),
+        macdHistogram: lastMACDHist,
+        volumeSpike: isVolumeSpike,
+        atrPct,
+        emaTrend: currentPrice > ema200,
+        orderbookImbalance: parseFloat(orderbookData.imbalance || 0),
+        liquiditySweep: !!detectLiquiditySweep(candles),
+        regime,
+        session,
+        bosType: bosData.bos,
+        whaleDominance: whaleData.dominance,
+        deltaRatio: orderflowData.deltaRatio,
+        clusterScore: clusterData.score
+    });
+    const mlPrediction = await getMLPrediction(mlFeatures);
+
     // ── Spread & Slippage Calculation ──
     let spread = 0;
     if (futuresData?.depth?.asks?.length > 0 && futuresData?.depth?.bids?.length > 0) {
@@ -491,52 +606,76 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     let bullishScore = 0;
     let bearishScore = 0;
 
+    // ── NEW WEIGHTING SYSTEM (User Request) ──
+    /**
+     * Better weighting:
+     * Market Structure → 30
+     * Liquidity → 20
+     * Volume → 15
+     * Momentum → 10
+     * SR → 10
+     * VWAP → 5
+     * Orderbook → 5
+     * EMA200 → 5
+     */
+
     // A. Market Structure (25%)
     if (marketStructureData.structure === 'BULLISH') bullishScore += 25;
     else if (marketStructureData.structure === 'BEARISH') bearishScore += 25;
 
-    // B. Support / Resistance (15%)
-    if (srRating >= 75) bullishScore += 15;
-    else if (srRating <= 28) bearishScore += 15;
+    // B. Liquidity Zones + Clusters (20%)
+    if (liqScore > 60) bullishScore += 12;
+    else if (liqScore < 40) bearishScore += 12;
+    // Cluster proximity bonus (±8)
+    if (clusterData.score > 60) bullishScore += 8;
+    else if (clusterData.score < 40) bearishScore += 8;
 
-    // C. Volume Flow + Profile (15%)
-    if (volumeScore > 65) bullishScore += 15;
-    else if (volumeScore < 35) bearishScore += 15;
+    // C. Volume Flow + Profile + Orderflow Delta (15%)
+    if (volumeScore > 65) bullishScore += 10;
+    else if (volumeScore < 35) bearishScore += 10;
+    if (orderflowData.score > 65) bullishScore += 5;
+    else if (orderflowData.score < 35) bearishScore += 5;
 
-    // D. Liquidity Zones (10%)
-    if (liqScore > 60) bullishScore += 10;
-    else if (liqScore < 40) bearishScore += 10;
-
-    // E. Momentum - RSI & MACD (10%)
+    // D. Momentum - RSI & MACD (10%)
     if (momentumScore > 60) bullishScore += 10;
     else if (momentumScore < 40) bearishScore += 10;
 
-    // User Requirement: RSI < 40 contributes to bearishness
-    const currentRSI_val = parseFloat(rsiValues[rsiValues.length - 1] ?? 50);
-    if (currentRSI_val < 40) bearishScore += 5;
-    if (currentRSI_val > 60) bullishScore += 5;
+    // E. Support / Resistance (10%)
+    if (srRating >= 75) bullishScore += 10;
+    else if (srRating <= 28) bearishScore += 10;
 
-    // F. VWAP Bias (5%)
+    // F. Orderbook Imbalance + Whale Detection (10%)
+    if (orderbookData.score > 60) bullishScore += 5;
+    else if (orderbookData.score < 40) bearishScore += 5;
+    if (whaleData.dominance === 'WHALE_BUY') bullishScore += 5;
+    else if (whaleData.dominance === 'WHALE_SELL') bearishScore += 5;
+
+    // G. Smart Money: BOS + Order Block (10%)
+    if (bosData.bos === 'BULLISH_BOS') bullishScore += 10;
+    else if (bosData.bos === 'BEARISH_BOS') bearishScore += 10;
+    else if (bosData.bos === 'BULLISH_CHOCH') bullishScore += 5;
+    else if (bosData.bos === 'BEARISH_CHOCH') bearishScore += 5;
+
+    // H. VWAP Bias (5%)
     if (vwapData.bias === 'Bullish') bullishScore += 5;
     else bearishScore += 5;
 
-    // G. Orderbook Imbalance (10%)
-    if (orderbookData.score > 60) bullishScore += 10;
-    else if (orderbookData.score < 40) bearishScore += 10;
+    // I. EMA 200 Trend (5%)
+    if (currentPrice > ema200) bullishScore += 5;
+    else bearishScore += 5;
 
-    // H. EMA 200 Trend (10%)
-    if (currentPrice > ema200) bullishScore += 10;
-    else bearishScore += 10;
+    // J. ML Prediction Bonus (up to +8 pts)
+    if (mlPrediction && mlPrediction.available) {
+        if (mlPrediction.buyProbability > 70) bullishScore += 8;
+        else if (mlPrediction.sellProbability > 70) bearishScore += 8;
+    }
 
-    // I. Futures Confirmation (5%)
-    if (futuresScore === 100) bullishScore += 5;
-    else if (futuresScore === 0) bearishScore += 5;
-
-    // ── SESSION FILTER ──
+    // ── SESSION FILTER (BEST UTC: 07:00 - 16:00, WORST: 20:00 - 03:00) ──
     const hour = new Date().getUTCHours();
-    const isLondon = hour >= 7 && hour <= 12;
-    const isNY = hour >= 13 && hour <= 20;
-    let sessionBonus = (isLondon || isNY) ? 5 : -10;
+    const isBestTime = hour >= 7 && hour <= 16;
+    const isBadTime = hour >= 20 || hour <= 3;
+
+    let sessionBonus = isBestTime ? 5 : isBadTime ? -15 : 0;
 
     // Apply session bonus to the dominant side
     if (bullishScore > bearishScore) bullishScore += sessionBonus;
@@ -553,15 +692,10 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     const volumeScore_val = (volumeData.score + volProfile.score) / 2;
     const breakoutProb = calculateBreakoutProbability(candles, volumeScore_val, momentumScore, volScore);
 
-    const high = candles.map(c => c.high), low = candles.map(c => c.low);
-    const atrArr = ATR.calculate({ high, low, close: prices, period: 14 });
-    const currentATR = atrArr[atrArr.length - 1] ?? currentPrice * 0.01;
-    const atrPct = (currentATR / currentPrice) * 100;
-
     // ── ADAPTIVE THRESHOLD ──────────────────────────────
-    let trendThreshold = 65; 
-    if (atrPct > 1.2) trendThreshold = 60; 
-    else if (atrPct < 0.3) trendThreshold = 70; 
+    let trendThreshold = 65;
+    if (atrPct > 1.2) trendThreshold = 60;
+    else if (atrPct < 0.3) trendThreshold = 70;
 
     // ── SIGNAL DECISION ──
     let finalAction = 'WAIT';
@@ -576,12 +710,32 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
         adjustedProb = bearishProb;
     }
 
+    // ── Trend Strength Filter (ADX) ──
+    const adxValues = ADX.calculate({
+        high: candles.map(c => c.high),
+        low: candles.map(c => c.low),
+        close: candles.map(c => c.close),
+        period: 14
+    });
+    const currentADX = adxValues[adxValues.length - 1]?.adx ?? 0;
+
+    // Block non-trending markets unless extremely strong confluence
+    if (currentADX < 18 && adjustedProb < 82) {
+        finalAction = 'WAIT';
+    }
+
     // ── Trend Strength Detection (STRICT to avoid fake signals) ──
     const trendStrength = Math.abs(bullishProb - bearishProb);
     // Requires clear dominance to avoid fake signals
     if (adjustedProb < 78 && trendStrength < 10) {
         finalAction = 'WAIT';
     }
+
+    // ── Time-Based Avoidance (LATE NY / LOW LIQUIDITY) ──
+    if (isBadTime && adjustedProb < 85) {
+        finalAction = 'WAIT';
+    }
+
 
     // ── ADVANCED ACCURACY FILTERS ──
 
@@ -643,11 +797,22 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     if (srRating >= 75) factors.push('Support Bounce');
     if (srRating <= 28) factors.push('Resistance Rejection');
     if (isVolumeSpike) factors.push('Volume Spike');
+    if (volumeData.isHighDelta) factors.push(`Volume Delta (${volumeData.deltaPct})`);
     if (orderbookData.score > 60) factors.push('Orderbook Bids+');
     if (orderbookData.score < 40) factors.push('Orderbook Asks+');
     if (liquiditySweep) factors.push('Liquidity Sweep');
     if (finalAction !== 'WAIT' && (currentPrice > ema200 && finalAction === 'BUY')) factors.push('EMA 200 Support');
     if (finalAction !== 'WAIT' && (currentPrice < ema200 && finalAction === 'SELL')) factors.push('EMA 200 Resistance');
+    // Smart Money confluence tags
+    if (bosData.bos === 'BULLISH_BOS') factors.push('🔵 Bullish BOS');
+    if (bosData.bos === 'BEARISH_BOS') factors.push('🔴 Bearish BOS');
+    if (whaleData.dominance === 'WHALE_BUY')  factors.push('🐳 Whale Buy Wall');
+    if (whaleData.dominance === 'WHALE_SELL') factors.push('🐳 Whale Sell Wall');
+    if (orderflowData.bias.includes('BUY'))   factors.push(`📊 Buy Delta (${(orderflowData.deltaRatio * 100).toFixed(0)}%)`);
+    if (orderflowData.bias.includes('SELL'))  factors.push(`📊 Sell Delta (${(orderflowData.deltaRatio * 100).toFixed(0)}%)`);
+    if (clusterData.clusterCount > 0) factors.push(`💧 Liquidity Pool (${clusterData.clusterCount} clusters)`);
+    if (mlPrediction?.available && mlPrediction.buyProbability > 70)  factors.push(`🤖 ML Buy (${mlPrediction.buyProbability}%)`);
+    if (mlPrediction?.available && mlPrediction.sellProbability > 70) factors.push(`🤖 ML Sell (${mlPrediction.sellProbability}%)`);
 
     const isRegimeAligned = (finalAction === 'BUY' && regime.includes('BULLISH')) ||
         (finalAction === 'SELL' && regime.includes('BEARISH')) || (regime === 'RANGING');
@@ -661,7 +826,7 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     const bodySize = Math.abs(lastCandle.close - lastCandle.open) || 0.00000001; // prevent div by zero
     const upperWick = lastCandle.high - Math.max(lastCandle.open, lastCandle.close);
     const lowerWick = Math.min(lastCandle.open, lastCandle.close) - lastCandle.low;
-    
+
     // STRICT: Wick rejection threshold.
     if (adjustedProb < 75) {
         if (finalAction === 'BUY' && upperWick > bodySize * 2.0) finalAction = 'WAIT'; // Rejected from above
@@ -679,12 +844,12 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     else if (adjustedProb < 65) strengthLabel = 'Weak';
 
     // ── RISK MODEL (TP/SL) ───────────────────────────
-    const riskAmount = currentATR * 1.5;
+    const riskAmount = currentATR * riskConfig.atrMultiplierSL;
     let slVal = finalAction === 'BUY' ? currentPrice - riskAmount : currentPrice + riskAmount;
 
-    // User wants Target 1 = Entry + (Risk * 2) and Target 2 = Entry + (Risk * 3)
-    let tp1 = finalAction === 'BUY' ? currentPrice + (riskAmount * 2) : currentPrice - (riskAmount * 2);
-    let tp2 = finalAction === 'BUY' ? currentPrice + (riskAmount * 3) : currentPrice - (riskAmount * 3);
+    // Targets based on RR
+    let tp1 = finalAction === 'BUY' ? currentPrice + (riskAmount * riskConfig.target1RR) : currentPrice - (riskAmount * riskConfig.target1RR);
+    let tp2 = finalAction === 'BUY' ? currentPrice + (riskAmount * riskConfig.target2RR) : currentPrice - (riskAmount * riskConfig.target2RR);
 
     let targetType = 'Institutional RR';
 
@@ -701,8 +866,10 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
     const actualReward = Math.abs(tp1 - currentPrice);
     const rrRatio = (actualReward / actualRisk).toFixed(1);
 
-    // Expiry: 15 minutes for scalping
-    const expiresInMs = 15 * 60 * 1000;
+    // Dynamic Expiry based on timeframe
+    let expiresInMs = riskConfig.scalpingExpiryMs;
+    if (timeframe === '1h') expiresInMs = riskConfig.intradayExpiryMs;
+    if (timeframe === '4h') expiresInMs = riskConfig.swingExpiryMs;
 
     return {
         symbol,
@@ -740,7 +907,13 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
             orderbook: Math.round(orderbookScore),
             bullishScore: Math.round(bullishScore),
             bearishScore: Math.round(bearishScore),
-            futures: Math.round(futuresScore)
+            futures: Math.round(futuresScore),
+            // Smart Money scores
+            smartMoneyBOS:      Math.round(bosData.score),
+            liquidityCluster:   Math.round(clusterData.score),
+            whaleDetection:     Math.round(whaleData.score),
+            orderflow:          Math.round(orderflowData.score),
+            mlPrediction:       mlPrediction?.confidence ?? 50
         },
         institutional: {
             liquidity: liquiditySweep?.type ?? null,
@@ -760,6 +933,31 @@ export function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknown', fu
             orderbook: orderbookData,
             fundingRate: futuresData?.fundingRate ?? '0.0000',
             openInterest: futuresData?.openInterest ?? 0
+        },
+        smartMoney: {
+            bos:            bosData.bos,
+            bosDetail:      bosData.detail,
+            swingHigh:      bosData.swingHigh,
+            swingLow:       bosData.swingLow,
+            liquidityClusters: clusterData.clusters.slice(0, 5),
+            nearestBidPool: clusterData.nearestBid,
+            nearestAskPool: clusterData.nearestAsk,
+            whales: {
+                dominance:        whaleData.dominance,
+                whaleBuyWalls:    whaleData.whaleBuyWall,
+                whaleSellWalls:   whaleData.whaleSellWall,
+                topBidWall:       whaleData.topBidWall,
+                topAskWall:       whaleData.topAskWall
+            },
+            orderflow: {
+                delta:         orderflowData.delta,
+                deltaRatio:    orderflowData.deltaRatio,
+                bias:          orderflowData.bias,
+                isAccelerating: orderflowData.isAccelerating,
+                buyVol:        orderflowData.buyVol,
+                sellVol:       orderflowData.sellVol
+            },
+            ml: mlPrediction
         }
     };
 }

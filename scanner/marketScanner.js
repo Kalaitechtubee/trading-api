@@ -1,48 +1,49 @@
 import { getCandles, getFuturesData, getOrderbook, getTopVolumeSymbols } from '../services/binanceService.js';
-import { getForexCandles } from '../services/forexService.js';
+import { getForexCandles, isForexDisabled } from '../services/forexService.js';
 import { sendSignalAlert } from '../services/telegramService.js';
 import { addSignal } from '../memory/signalStore.js';
-import { runAIAnalysis } from './technical.js';
+import { runAIAnalysis, analyzeTimeVolatility } from './technical.js';
 import { ATR } from 'technicalindicators';
 import { getCachedCandles, updateCandles } from '../memory/candleStore.js';
 import { recordTrade, updateTradeStatus } from '../memory/backtestStore.js';
+import { cacheCandles, getRedisCandles } from '../redis/candleCache.js';
+import { getDeltaSymbols } from '../services/deltaService.js';
+import scannerConfig from '../config/scannerConfig.js';
 
 // ── Configuration ────────────────────────────────────────────
-// Minimum score to store and alert on
-const MIN_SCORE_TO_ALERT = 72; // Raised back to 72 to avoid fake signals
-const PREMIUM_SIGNAL_THRESHOLD = 82;
-const MIN_SCORE_TO_STORE = 60;
+const {
+    minScoreToAlert: MIN_SCORE_TO_ALERT,
+    premiumSignalThreshold: PREMIUM_SIGNAL_THRESHOLD,
+    minScoreToStore: MIN_SCORE_TO_STORE,
+    debugSignals: DEBUG_SIGNALS,
+    forexScanInterval: FOREX_SCAN_INTERVAL,
+    defaultCryptoSymbols,
+    forexSymbols: FOREX_SYMBOLS,
+    timeframes: TIMEFRAMES,
+    alertCooldownMs: COOLDOWN_MS
+} = scannerConfig;
 
-// Professional Scalping Symbols (High Liquidity)
-let CRYPTO_SYMBOLS = [
-    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
-    'ADAUSDT', 'DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'POLUSDT',
-    'TRXUSDT', 'LTCUSDT', 'DOTUSDT', 'MATICUSDT', 'ATOMUSDT',
-    'SUIUSDT', 'APTUSDT', 'NEARUSDT', 'ARBUSDT', 'OPUSDT'
-];
-
-const FOREX_SYMBOLS = [
-    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "NZD/USD",
-    "EUR/JPY", "GBP/JPY" // Added EURJPY and GBPJPY
-];
-
-// Scalping + Intraday Timeframes: 5m (Entry), 15m (Setup), 1h (Structure/Trend Bias)
-const TIMEFRAMES = ['5m', '15m', '1h'];
+let CRYPTO_SYMBOLS = [...defaultCryptoSymbols];
 
 // Alert cooldown map: symbol_timeframe → last alert timestamp
 const alertCooldown = new Map();
-const COOLDOWN_MS = 12 * 60 * 1000; // Lowered from 15m to 12m
-
-// ── Scanner State ─────────────────────────────────────────────
-let isScanning = false;
-let scanCount = 0;
 
 /**
  * Check alert cooldown for a symbol/timeframe combo
  */
 function canAlert(key) {
     const last = alertCooldown.get(key) || 0;
-    return Date.now() - last > COOLDOWN_MS;
+    return Date.now() - last > COOLDOWN_MS
+}
+
+/**
+ * Get visual grade for a signal based on score
+ */
+function getSignalGrade(score) {
+    if (score >= 82) return { grade: 'S', color: 'ELITE 👑' };
+    if (score >= 75) return { grade: 'A', color: 'STRONG 💎' };
+    if (score >= 70) return { grade: 'B', color: 'STABLE 🚀' };
+    return { grade: 'C', color: 'WEAK ⚪' };
 }
 
 /**
@@ -50,11 +51,14 @@ function canAlert(key) {
  */
 async function scanSymbol(symbol, timeframe) {
     try {
-        // ── Candle Cache System ───────────────────────────────────
+        // ... (existing caching logic remains)
         let candles = getCachedCandles(symbol, timeframe);
+        
+        if (!candles) {
+            candles = await getRedisCandles(symbol, timeframe);
+            if (candles) updateCandles(symbol, timeframe, candles);
+        }
 
-        // Always fetch 300 candles if cache is below 200 (EMA200 needs 200+ candles)
-        // Otherwise top up with last 20 to stay current
         const fetchCount = (!candles || candles.length < 200) ? 300 : 20;
 
         let freshCandles;
@@ -63,20 +67,14 @@ async function scanSymbol(symbol, timeframe) {
         } else {
             freshCandles = await getCandles(symbol, timeframe, fetchCount);
         }
-        if (!freshCandles || freshCandles.length === 0) {
-            return null;
-        }
+        if (!freshCandles || freshCandles.length === 0) return null;
 
-        // Update memory cache and get full history
         updateCandles(symbol, timeframe, freshCandles);
         candles = getCachedCandles(symbol, timeframe);
+        if (candles) await cacheCandles(symbol, timeframe, candles);
 
-        // EMA200 needs at least 200 candles — skip if insufficient
-        if (!candles || candles.length < 200) {
-            return null;
-        }
+        if (!candles || candles.length < 200) return null;
 
-        // ── Volatility Filter ─────────────────────────────────────
         const close = candles.map(c => c.close);
         const atrVals = ATR.calculate({
             high: candles.map(c => c.high),
@@ -87,10 +85,8 @@ async function scanSymbol(symbol, timeframe) {
         const lastATR = atrVals[atrVals.length - 1] ?? 0;
         const atrPct = (lastATR / close[close.length - 1]) * 100;
 
-        // Relaxed volatility filter for Forex or slow markets (Lowered from 0.05 to 0.02)
         if (atrPct < 0.02) return null;
 
-        // Fetch futures data and Orderbook depth (Parallel)
         const [futuresData, depth] = await Promise.all([
             getFuturesData(symbol),
             getOrderbook(symbol, 50)
@@ -98,31 +94,38 @@ async function scanSymbol(symbol, timeframe) {
 
         if (futuresData) futuresData.depth = depth;
 
-        // Run full technical analysis
-        const result = runAIAnalysis(candles, timeframe, symbol, futuresData);
+        const result = await runAIAnalysis(candles, timeframe, symbol, futuresData);
 
-        if (!result || result.error || !result.score) {
-            return null;
-        }
+        if (!result || result.error || !result.score) return null;
 
         result.marketType = symbol.includes("/") ? 'Forex' : 'Crypto';
+        result.grade = getSignalGrade(result.score);
 
-        // Always store scan results
+        // Store result for history
         addSignal(result);
 
-        if (timeframe === '5m') {
+        if (timeframe === '5m' && result.marketType === 'Crypto') {
             updateTradeStatus(symbol, result.price);
         }
 
-        const emoji = result.action === 'BUY' ? '🟢' : result.action === 'SELL' ? '🔴' : '⚪';
-        console.log(`[Scanner] ${emoji} ${symbol.padStart(8)} ${timeframe.padStart(3)} → ${result.action.padEnd(6)} (${result.score}%)`);
+        // We only log to console here if it's a valid signal to keep it clean, 
+        // or we return the result for the summary in scanMarket.
+        if (DEBUG_SIGNALS && result.action !== 'WAIT' && result.score >= MIN_SCORE_TO_ALERT) {
+            const emoji = result.action === 'BUY' ? '🟢' : '🔴';
+            console.log(`\n[Scanner] ${emoji} ${symbol.padStart(8)} ${timeframe.padStart(3)} → ${result.action} (${result.score}%) [Grade ${result.grade.grade}]`);
+        }
 
         return result;
 
     } catch (err) {
+        if (DEBUG_SIGNALS) console.error(`[Scanner] Error scanning ${symbol} ${timeframe}:`, err.message);
         return null;
     }
 }
+
+// ── Scanner State ─────────────────────────────────────────────
+let isScanning = false;
+let scanCount = 0;
 
 /**
  * Main scan function — scans all symbols across all timeframes
@@ -133,82 +136,64 @@ export async function scanMarket() {
     isScanning = true;
     scanCount++;
     const startTime = Date.now();
+    let allResults = [];
 
     try {
         // ── DYNAMIC SYMBOL UPDATING ──
-        // Every 10 scans, refresh the crypto list with top 35 volume pairs
         if (scanCount % 10 === 1) {
-            const topList = await getTopVolumeSymbols(50); // Increased from 35 to 50
+            const topList = await getTopVolumeSymbols(200);
+            const deltaSymbols = await getDeltaSymbols();
             if (topList && topList.length > 10) {
-                CRYPTO_SYMBOLS = topList;
-                console.log(`[Scanner] Dynamic Symbol Update: ${CRYPTO_SYMBOLS.length} coins loaded.`);
+                const filteredList = topList.filter(symbol => deltaSymbols.includes(symbol));
+                CRYPTO_SYMBOLS = filteredList.length > 5 ? filteredList : topList;
+                console.log(`[Scanner] Dynamic Symbol Update: ${CRYPTO_SYMBOLS.length} Delta Exchange coins loaded.`);
             }
         }
 
-        const allResults = [];
-        const activeSymbols = [...CRYPTO_SYMBOLS, ...FOREX_SYMBOLS];
+        const shouldScanForex = !isForexDisabled() && (scanCount % FOREX_SCAN_INTERVAL === 1);
+        
+        console.log(`[Scanner] ═══ Scan #${scanCount} | ${CRYPTO_SYMBOLS.length} crypto${shouldScanForex ? ` + ${FOREX_SYMBOLS.length} forex` : ''} ═══`);
 
-        console.log(`[Scanner] ═══ Scan #${scanCount} | ${activeSymbols.length} Symbols ═══`);
+        // ── 1. Crypto Scanning (Parallel Groups) ──────────────────
+        process.stdout.write(`[Scanner] Scanning Crypto Pairs... `);
+        const cryptoChunks = [];
+        const chunkSize = 5; // Scan 5 symbols in parallel
+        for (let i = 0; i < CRYPTO_SYMBOLS.length; i += chunkSize) {
+            cryptoChunks.push(CRYPTO_SYMBOLS.slice(i, i + chunkSize));
+        }
 
-        for (const symbol of activeSymbols) {
-            try {
-                const isForex = symbol.includes("/");
-                let tfResults = [];
+        for (const chunk of cryptoChunks) {
+            const chunkResults = await Promise.all(chunk.map(async (symbol) => {
+                const results = await Promise.all(TIMEFRAMES.map(tf => scanSymbol(symbol, tf)));
+                const validTfResults = results.filter(r => r !== null);
+                return { symbol, results: validTfResults };
+            }));
 
-                if (isForex) {
-                    for (const tf of TIMEFRAMES) {
-                        const res = await scanSymbol(symbol, tf);
-                        if (res) tfResults.push(res);
-                        // Delay for Forex API rate limits (7.6s aligns closer to 8/min limit)
-                        await new Promise(r => setTimeout(r, 7600));
-                    }
-                } else {
-                    const results = await Promise.all(TIMEFRAMES.map(tf => scanSymbol(symbol, tf)));
-                    tfResults = results.filter(r => r !== null);
-                    await new Promise(r => setTimeout(r, 200));
-                }
-
-                const tfResultsFiltered = tfResults.filter(r => r.action !== 'WAIT' && r.score >= MIN_SCORE_TO_ALERT);
-
-                // Multi-Timeframe Alignment Check
-                const m5 = tfResults.find(r => r.timeframe === '5m');
-                const m15 = tfResults.find(r => r.timeframe === '15m');
-                const h1 = tfResults.find(r => r.timeframe === '1h');
-
-                const validSignals = tfResultsFiltered.filter(sig => {
-                    if (sig.timeframe === '1h') return true; // 1H is the anchor
-                    if (h1 && h1.bias) {
-                        const isCounterTrend = (sig.action === 'BUY' && h1.bias.includes('Bearish')) || 
-                                               (sig.action === 'SELL' && h1.bias.includes('Bullish'));
-                        // Block counter-trend signals on lower TFs unless score is strongly convincing (>= 78)
-                        if (isCounterTrend && sig.score < 78) return false;
-                    }
-                    return true;
-                });
-
-                for (const sig of validSignals) {
-                    if (!canAlert(`${sig.symbol}_ALERT`)) continue;
-
-                    // Determine Label
-                    const isElite = (m5 && h1 && m15 && m5.bias === h1.bias && m5.bias === m15.bias);
-                    let label = '⚡ SCALP';
-                    if (sig.timeframe === '15m') label = '🎯 INTRADAY';
-                    if (sig.timeframe === '1h') label = '🏛️ SWING';
-                    if (isElite) label = '🚀 ELITE';
-                    if (sig.score >= PREMIUM_SIGNAL_THRESHOLD) label = '👑 PREMIUM';
-
-                    const dispatchSig = { ...sig, premiumLabel: label, isElite };
-
-                    await sendSignalAlert(dispatchSig);
-                    recordTrade(dispatchSig);
-                    alertCooldown.set(`${sig.symbol}_ALERT`, Date.now());
-                    console.log(`[Scanner] 🔥 Signal Sent: ${sig.symbol} ${sig.timeframe} ${sig.action} [${label}] (${sig.score}%)`);
-                }
-
-                allResults.push(...tfResults);
-            } catch (err) {
-                console.error(`[Scanner] Symbol loop error for ${symbol}:`, err.message);
+            for (const { symbol, results } of chunkResults) {
+                allResults.push(...results);
+                await processSignalResults(symbol, results);
             }
+            // Small gap between chunks
+            await new Promise(r => setTimeout(r, 500));
+        }
+        process.stdout.write(`done.\n`);
+
+        // ── 2. Forex Scanning (Sequential) ───────────────────────
+        if (shouldScanForex) {
+            process.stdout.write(`[Scanner] Scanning Forex Pairs... `);
+            for (const symbol of FOREX_SYMBOLS) {
+                const tfResults = [];
+                for (const tf of TIMEFRAMES) {
+                    const res = await scanSymbol(symbol, tf);
+                    if (res) tfResults.push(res);
+                    await new Promise(r => setTimeout(r, 7600)); // Strict Forex Limit
+                }
+                allResults.push(...tfResults);
+                await processSignalResults(symbol, tfResults);
+            }
+            process.stdout.write(`done.\n`);
+        } else if (!isForexDisabled()) {
+            console.log(`[Scanner] ⏭️  Forex SKIPPED (Next in ${FOREX_SCAN_INTERVAL - (scanCount % FOREX_SCAN_INTERVAL)} scan(s))`);
         }
 
     } catch (err) {
@@ -216,9 +201,81 @@ export async function scanMarket() {
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[Scanner] ═══ Scan #${scanCount} complete in ${elapsed}s ═══\n`);
+    const alertsSent = allResults.filter(r => r && r.action !== 'WAIT' && r.score >= MIN_SCORE_TO_ALERT).length;
+    console.log(`[Scanner] ═══ Scan #${scanCount} complete in ${elapsed}s | ${alertsSent} signals triggered ═══\n`);
     isScanning = false;
 }
+
+/**
+ * Filter, Process and Send signals for a symbol
+ */
+async function processSignalResults(symbol, tfResults) {
+    if (!tfResults || tfResults.length === 0) return;
+
+    // 1. Score Filter
+    const tfResultsFiltered = tfResults.filter(r => r.action !== 'WAIT' && r.score >= MIN_SCORE_TO_ALERT);
+
+    // 2. MTF Alignment
+    const m5  = tfResults.find(r => r.timeframe === '5m');
+    const m15 = tfResults.find(r => r.timeframe === '15m');
+    const h1  = tfResults.find(r => r.timeframe === '1h');
+    const h4  = tfResults.find(r => r.timeframe === '4h');
+
+    const mtfRoadmap = {
+        m5: m5 ? m5.bias : 'Neutral',
+        m15: m15 ? m15.bias : 'Neutral',
+        h1: h1 ? h1.bias : 'Neutral',
+        h4: h4 ? h4.bias : 'Neutral'
+    };
+
+    const validSignals = tfResultsFiltered.filter(sig => {
+        sig.mtfRoadmap = mtfRoadmap;
+        if (h4 && h4.bias) {
+            const isCounter = (sig.action === 'BUY' && h4.bias === 'Bearish') || (sig.action === 'SELL' && h4.bias === 'Bullish');
+            if (isCounter && sig.score < 82) return false;
+        }
+        if ((sig.timeframe === '5m' || sig.timeframe === '15m') && h1 && h1.trend) {
+            const isCounter = (sig.action === 'BUY' && h1.trend === 'Bearish') || (sig.action === 'SELL' && h1.trend === 'Bullish');
+            if (isCounter && sig.score < 78) return false;
+        }
+        return true;
+    });
+
+    // Logging Summary
+    if (validSignals.length === 0) {
+        const maxScore = Math.max(...tfResults.map(r => r.score || 0), 0);
+        if (maxScore > 0) {
+            // Only log if something interesting happened (score > 55)
+            if (maxScore > 55) {
+                console.log(`[Scanner] ⚪ ${symbol.padStart(8)} → No Strong Setup (Highest Score: ${maxScore}%)`);
+            }
+        }
+        return;
+    }
+
+    // 3. Dispatch
+    for (const sig of validSignals) {
+        const cooldownKey = `${sig.symbol}_${sig.timeframe}`;
+        if (!canAlert(cooldownKey)) continue;
+
+        const isElite = (m5 && h1 && m15 && m5.bias === h1.bias && m5.bias === m15.bias);
+        let label = sig.timeframe === '5m' ? '⚡ SCALP' : sig.timeframe === '15m' ? '🎯 INTRADAY' : sig.timeframe === '1h' ? '🏛️ SWING' : '📊 POSITION';
+        if (isElite) label = '🚀 ELITE';
+        if (sig.score >= PREMIUM_SIGNAL_THRESHOLD) label = '👑 PREMIUM';
+
+        const dispatchSig = { ...sig, premiumLabel: label, isElite };
+
+        try {
+            await sendSignalAlert(dispatchSig);
+            recordTrade(dispatchSig);
+            alertCooldown.set(cooldownKey, Date.now());
+            console.log(`[Scanner] 🔥 Signal Sent: ${sig.symbol} ${sig.timeframe} ${sig.action} [${label}] (${sig.score}%) [Grade ${sig.grade.grade}]`);
+        } catch (err) {
+            console.error(`[Scanner] ❌ Send failure for ${sig.symbol}:`, err.message);
+        }
+    }
+}
+
 
 /**
  * Get scanner configuration info

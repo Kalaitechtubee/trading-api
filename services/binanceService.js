@@ -12,25 +12,27 @@ const BINANCE_FUTURES_BASE = 'https://fapi.binance.com/fapi/v1';
 const STABLECOINS = ['USDC', 'FDUSD', 'TUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'BUSD', 'AEUR', 'ZAR', 'USDS'];
 const BLACKLIST = ['SHIB', 'PEPE', 'FLOKI', 'MEME', 'BONK', 'WIF', 'LUNC', 'USTC', 'BTTC'];
 
-const DATA_API_BASE = 'https://data-api.binance.vision/api/v3';
+const DATA_API_BASE = 'https://api.binance.vision/api/v3';
 
 /**
  * Fetch OHLCV candle data from Binance spot
- * Uses a primary bypass endpoint for restricted regions (Render/Cloud)
+ * Uses multiple endpoints to bypass regional restrictions and handle timeouts
  */
 export async function getCandles(symbol, interval = '15m', limit = 300) {
-    // Primary: data-api.binance.vision (Not restricted)
-    // Fallback: api.binance.com (Standard)
     const endpoints = [
-        `${DATA_API_BASE}/klines`,
-        `${BINANCE_BASE}/klines`
+        `${BINANCE_BASE}/klines`,
+        `https://api1.binance.com/api/v3/klines`,
+        `https://api2.binance.com/api/v3/klines`,
+        `https://api3.binance.com/api/v3/klines`,
+        `https://api-gcp.binance.com/api/v3/klines`,
+        `https://api.binance.vision/api/v3/klines` // Kept as last resort
     ];
 
     for (const url of endpoints) {
         try {
             const res = await axios.get(url, {
                 params: { symbol, interval, limit },
-                timeout: 12000
+                timeout: 10000 // Reduced timeout to fail faster and try next endpoint
             });
 
             if (res.data && Array.isArray(res.data)) {
@@ -40,12 +42,15 @@ export async function getCandles(symbol, interval = '15m', limit = 300) {
                     high: Number(k[2]),
                     low: Number(k[3]),
                     close: Number(k[4]),
-                    volume: Number(k[5])
+                    volume: Number(k[5]),
+                    buyVolume: Number(k[9])     // Taker buy base asset volume
                 }));
             }
         } catch (err) {
-            console.warn(`[BinanceService] ${url} failed for ${symbol}: ${err.message}`);
-            // Continue to next endpoint
+            // Only log as warning if it's NOT a DNS error (ENOTFOUND) to keep logs clean
+            if (err.code !== 'ENOTFOUND') {
+                console.warn(`[BinanceService] ${url} failed for ${symbol}: ${err.message}`);
+            }
         }
     }
 
@@ -105,7 +110,7 @@ export async function getOrderbook(symbol, limit = 50) {
  */
 export async function getTopVolumeSymbols(limit = 50) {
     try {
-        const res = await axios.get(`${BINANCE_BASE}/ticker/24hr`, { timeout: 10000 });
+        const res = await axios.get(`${BINANCE_BASE}/ticker/24hr`, { timeout: 15000 });
         return res.data
             .filter(t => {
                 const isUSDT = t.symbol.endsWith('USDT');

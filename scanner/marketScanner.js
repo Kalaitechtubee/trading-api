@@ -196,13 +196,35 @@ export async function scanMarket() {
             console.log(`[Scanner] ⏭️  Forex SKIPPED (Next in ${FOREX_SCAN_INTERVAL - (scanCount % FOREX_SCAN_INTERVAL)} scan(s))`);
         }
 
+        // ── Periodic Performance Log ───────────────────────────
+        if (scanCount % 10 === 0) {
+            try {
+                const { getDailyStats } = await import('../services/dailyReport.js');
+                const stats = getDailyStats();
+                console.log(`\n📊 [Performance] Daily Stats: ${stats.win}W - ${stats.loss}L | WinRate: ${stats.winrate}% | Pending: ${stats.pending}`);
+            } catch (e) { /* ignore */ }
+        }
+
     } catch (err) {
         console.error('[Scanner] Master scan error:', err.message);
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const alertsSent = allResults.filter(r => r && r.action !== 'WAIT' && r.score >= MIN_SCORE_TO_ALERT).length;
-    console.log(`[Scanner] ═══ Scan #${scanCount} complete in ${elapsed}s | ${alertsSent} signals triggered ═══\n`);
+    const validSignals = allResults.filter(r => r && r.action !== 'WAIT' && r.score >= MIN_SCORE_TO_ALERT);
+    
+    if (validSignals.length > 0) {
+        console.log(`\n[Scanner] 🎯 Signals Detected in Scan #${scanCount}:`);
+        console.table(validSignals.map(s => ({
+            Symbol: s.symbol,
+            TF: s.timeframe,
+            Action: s.action,
+            Score: `${s.score}%`,
+            Grade: s.grade?.grade || 'C',
+            RR: s.riskReward
+        })));
+    }
+
+    console.log(`[Scanner] ═══ Scan #${scanCount} complete in ${elapsed}s | ${validSignals.length} signals triggered ═══\n`);
     isScanning = false;
 }
 

@@ -700,14 +700,25 @@ export async function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknow
     // ── SIGNAL DECISION ──
     let finalAction = 'WAIT';
     // Always show the dominant direction score (not flat 50) so scanner is informative
-    let adjustedProb = Math.max(bullishProb, bearishProb);
+    let technicalScore = Math.max(bullishProb, bearishProb);
+    let adjustedProb = technicalScore;
 
-    if (bullishProb > bearishProb && bullishProb >= trendThreshold) {
+    // ── AI CONFIDENCE BOOST (User Request) ──
+    // Blend Tech Score (70%) with ML Confidence (30%) if ML is strong
+    if (mlPrediction && mlPrediction.available && mlPrediction.confidence > 60) {
+        const mlTargetProb = (bullishProb > bearishProb) ? mlPrediction.buyProbability : mlPrediction.sellProbability;
+        
+        // Only blend if ML supports the technical direction
+        if ((bullishProb > bearishProb && mlPrediction.buyProbability > 55) || 
+            (bearishProb > bullishProb && mlPrediction.sellProbability > 55)) {
+            adjustedProb = Math.round((technicalScore * 0.7) + (mlTargetProb * 0.3));
+        }
+    }
+
+    if (bullishProb > bearishProb && adjustedProb >= trendThreshold) {
         finalAction = 'BUY';
-        adjustedProb = bullishProb;
-    } else if (bearishProb > bullishProb && bearishProb >= (trendThreshold - 5)) {
+    } else if (bearishProb > bullishProb && adjustedProb >= (trendThreshold - 5)) {
         finalAction = 'SELL';
-        adjustedProb = bearishProb;
     }
 
     // ── Trend Strength Filter (ADX) ──

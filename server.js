@@ -14,7 +14,7 @@ import { sendDailyReport } from './services/telegramService.js';
 import scannerConfig from './config/scannerConfig.js';
 
 // ── Hardcoded Config (no .env needed) ────────────────────────
-const PORT             = 5000;
+const PORT             = process.env.PORT || 5000;
 const SCAN_INTERVAL_MS = 180000;   // 3 minutes
 const FRONTEND_URL     = '';       // Set your production frontend URL here if needed
 

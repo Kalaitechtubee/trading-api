@@ -1,15 +1,13 @@
 /**
  * TREADING AI — Telegram Alert Service (Backend)
  * Sends institutional-grade styled alert messages to Telegram.
- * Token & Chat ID are loaded from environment variables.
  */
 
 import axios from 'axios';
-import dotenv from 'dotenv';
-dotenv.config();
 
-const TOKEN = process.env.TELEGRAM_TOKEN;
-const CHAT_ID = process.env.TELEGRAM_CHAT;
+// ── Hardcoded Config (no .env needed) ────────────────────────
+const TOKEN   = '8238974291:AAGYYuvnmo8Z-tqvV_DPXpzbYIOz7zwo8bg';
+const CHAT_ID = '1168520554';
 
 /**
  * Send a raw text message to Telegram

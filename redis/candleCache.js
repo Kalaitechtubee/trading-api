@@ -3,10 +3,9 @@
  * Optimized for high-speed retrieval of OHLCV data
  */
 import Redis from 'ioredis';
-import dotenv from 'dotenv';
-dotenv.config();
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+// ── Hardcoded Config (no .env needed) ────────────────────────
+const REDIS_URL = 'redis://localhost:6379';
 let redis = null;
 let isRedisConnected = false;
 

@@ -8,6 +8,7 @@ import { getCachedCandles, updateCandles } from '../memory/candleStore.js';
 import { recordTrade, updateTradeStatus } from '../memory/backtestStore.js';
 import { cacheCandles, getRedisCandles } from '../redis/candleCache.js';
 import { getDeltaSymbols } from '../services/deltaService.js';
+import { sendToSheet } from '../services/googleSheetService.js';
 import scannerConfig from '../config/scannerConfig.js';
 
 // ── Configuration ────────────────────────────────────────────
@@ -108,12 +109,9 @@ async function scanSymbol(symbol, timeframe) {
             updateTradeStatus(symbol, result.price);
         }
 
-        // We only log to console here if it's a valid signal to keep it clean, 
-        // or we return the result for the summary in scanMarket.
-        if (DEBUG_SIGNALS && result.action !== 'WAIT' && result.score >= MIN_SCORE_TO_ALERT) {
-            const emoji = result.action === 'BUY' ? '🟢' : '🔴';
-            console.log(`\n[Scanner] ${emoji} ${symbol.padStart(8)} ${timeframe.padStart(3)} → ${result.action} (${result.score}%) [Grade ${result.grade.grade}]`);
-        }
+        // We only log to console via the processSignalResults summary to avoid clutter
+        // and focus only on strict 4-TF aligned signals.
+
 
         return result;
 
@@ -170,28 +168,55 @@ export async function scanMarket() {
             }));
 
             for (const { symbol, results } of chunkResults) {
-                allResults.push(...results);
-                await processSignalResults(symbol, results);
+                // Visual progress for the user
+                if (DEBUG_SIGNALS) {
+                    const statusParts = results.map(r => {
+                        const emoji = r.action === 'BUY' ? '🟢' : r.action === 'SELL' ? '🔴' : '⚪';
+                        return `${r.timeframe}:${emoji}${r.score}%`;
+                    });
+                    const hasAction = results.some(r => r.action !== 'WAIT');
+                    const prefix = hasAction ? '🔥' : '🔍';
+                    // Clear line before printing to handle different lengths
+                    process.stdout.write(`\r${' '.repeat(80)}\r`); 
+                    process.stdout.write(`[Scanner] ${prefix} Scanning: ${symbol.padEnd(10)} [${statusParts.join(' | ')}]`);
+                }
+
+                const signal = await processSignalResults(symbol, results);
+                if (signal) {
+                    process.stdout.write(`\n`); // Move to next line if signal triggered
+                    allResults.push(signal);
+                }
             }
             // Small gap between chunks
             await new Promise(r => setTimeout(r, 500));
         }
-        process.stdout.write(`done.\n`);
+        process.stdout.write(`\n[Scanner] ✅ Crypto Scan Complete.\n`);
 
         // ── 2. Forex Scanning (Sequential) ───────────────────────
         if (shouldScanForex) {
-            process.stdout.write(`[Scanner] Scanning Forex Pairs... `);
+            console.log(`[Scanner] 🌍 Scanning Forex Pairs (Sequential)...`);
             for (const symbol of FOREX_SYMBOLS) {
                 const tfResults = [];
                 for (const tf of TIMEFRAMES) {
+                    const status = tfResults.map(r => {
+                        const emoji = r.action === 'BUY' ? '🟢' : r.action === 'SELL' ? '🔴' : '⚪';
+                        return `${r.timeframe}:${emoji}${r.score}%`;
+                    }).join(' | ') || 'Pending...';
+
+                    process.stdout.write(`\r${' '.repeat(80)}\r`);
+                    process.stdout.write(`[Scanner] 🌍 Forex: ${symbol.padEnd(10)} [${status} | ${tf}:⏳]`);
+                    
                     const res = await scanSymbol(symbol, tf);
                     if (res) tfResults.push(res);
                     await new Promise(r => setTimeout(r, 7600)); // Strict Forex Limit
                 }
-                allResults.push(...tfResults);
-                await processSignalResults(symbol, tfResults);
+                const signal = await processSignalResults(symbol, tfResults);
+                if (signal) {
+                    process.stdout.write(`\n`);
+                    allResults.push(signal);
+                }
             }
-            process.stdout.write(`done.\n`);
+            process.stdout.write(`\n[Scanner] ✅ Forex Scan Complete.\n`);
         } else if (!isForexDisabled()) {
             console.log(`[Scanner] ⏭️  Forex SKIPPED (Next in ${FOREX_SCAN_INTERVAL - (scanCount % FOREX_SCAN_INTERVAL)} scan(s))`);
         }
@@ -210,7 +235,7 @@ export async function scanMarket() {
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const validSignals = allResults.filter(r => r && r.action !== 'WAIT' && r.score >= MIN_SCORE_TO_ALERT);
+    const validSignals = allResults; // Now allResults only contains aligned ones
     
     if (validSignals.length > 0) {
         console.log(`\n[Scanner] 🎯 Signals Detected in Scan #${scanCount}:`);
@@ -230,19 +255,21 @@ export async function scanMarket() {
 
 /**
  * Filter, Process and Send signals for a symbol
+ * Requirement: All timeframes (5m, 15m, 1h, 4h) must align.
  */
 async function processSignalResults(symbol, tfResults) {
-    if (!tfResults || tfResults.length === 0) return;
+    if (!tfResults || tfResults.length === 0) return null;
 
-    // 1. Score Filter
-    const tfResultsFiltered = tfResults.filter(r => r.action !== 'WAIT' && r.score >= MIN_SCORE_TO_ALERT);
-
-    // 2. MTF Alignment
+    // 1. Identify key timeframes
     const m5  = tfResults.find(r => r.timeframe === '5m');
     const m15 = tfResults.find(r => r.timeframe === '15m');
     const h1  = tfResults.find(r => r.timeframe === '1h');
     const h4  = tfResults.find(r => r.timeframe === '4h');
 
+    // 2. Check if ALL required timeframes are present and successfully scanned
+    const allPresent = m5 && m15 && h1 && h4;
+    
+    // 3. MTF Roadmap (for visual feedback in alert)
     const mtfRoadmap = {
         m5: m5 ? m5.bias : 'Neutral',
         m15: m15 ? m15.bias : 'Neutral',
@@ -250,51 +277,59 @@ async function processSignalResults(symbol, tfResults) {
         h4: h4 ? h4.bias : 'Neutral'
     };
 
-    const validSignals = tfResultsFiltered.filter(sig => {
-        sig.mtfRoadmap = mtfRoadmap;
-        if (h4 && h4.bias) {
-            const isCounter = (sig.action === 'BUY' && h4.bias === 'Bearish') || (sig.action === 'SELL' && h4.bias === 'Bullish');
-            if (isCounter && sig.score < 82) return false;
+    if (!allPresent) {
+        if (DEBUG_SIGNALS && tfResults.some(r => r.score >= MIN_SCORE_TO_ALERT)) {
+            console.log(`[Scanner] ⚪ ${symbol.padStart(8)} → Missing data for some TFs (Required: 5m, 15m, 1h, 4h)`);
         }
-        if ((sig.timeframe === '5m' || sig.timeframe === '15m') && h1 && h1.trend) {
-            const isCounter = (sig.action === 'BUY' && h1.trend === 'Bearish') || (sig.action === 'SELL' && h1.trend === 'Bullish');
-            if (isCounter && sig.score < 78) return false;
-        }
-        return true;
-    });
-
-    // Logging Summary
-    if (validSignals.length === 0) {
-        const maxScore = Math.max(...tfResults.map(r => r.score || 0), 0);
-        if (maxScore > 0) {
-            // Only log if something interesting happened (score > 55)
-            if (maxScore > 55) {
-                console.log(`[Scanner] ⚪ ${symbol.padStart(8)} → No Strong Setup (Highest Score: ${maxScore}%)`);
-            }
-        }
-        return;
+        return null;
     }
 
-    // 3. Dispatch
-    for (const sig of validSignals) {
-        const cooldownKey = `${sig.symbol}_${sig.timeframe}`;
-        if (!canAlert(cooldownKey)) continue;
+    // 4. Directional Alignment: STRICT 4-TF REQUIREMENT
+    const action = m5.action;
+    if (action === 'WAIT') return null;
 
-        const isElite = (m5 && h1 && m15 && m5.bias === h1.bias && m5.bias === m15.bias);
-        let label = sig.timeframe === '5m' ? '⚡ SCALP' : sig.timeframe === '15m' ? '🎯 INTRADAY' : sig.timeframe === '1h' ? '🏛️ SWING' : '📊 POSITION';
-        if (isElite) label = '🚀 ELITE';
-        if (sig.score >= PREMIUM_SIGNAL_THRESHOLD) label = '👑 PREMIUM';
+    // Must have same action on ALL timeframes
+    const isAligned = tfResults.every(r => r.action === action);
+    
+    // 5. Score Check: ALL timeframes must pass threshold for maximum accuracy
+    const allPassThreshold = tfResults.every(r => r.score >= MIN_SCORE_TO_ALERT);
 
-        const dispatchSig = { ...sig, premiumLabel: label, isElite };
-
-        try {
-            await sendSignalAlert(dispatchSig);
-            recordTrade(dispatchSig);
-            alertCooldown.set(cooldownKey, Date.now());
-            console.log(`[Scanner] 🔥 Signal Sent: ${sig.symbol} ${sig.timeframe} ${sig.action} [${label}] (${sig.score}%) [Grade ${sig.grade.grade}]`);
-        } catch (err) {
-            console.error(`[Scanner] ❌ Send failure for ${sig.symbol}:`, err.message);
+    if (!isAligned || !allPassThreshold) {
+        if (DEBUG_SIGNALS && (m5.score > 80)) {
+            process.stdout.write(`\n`); // Break the progress line before logging filters
+            console.log(`[Scanner] ⚪ ${symbol.padStart(8)} → Alignment Filtered (Required: 4/4 Align)`);
         }
+        return null;
+    }
+
+    // 6. Dispatch Aligned Signal
+    // We use the 5m as the entry reference but enrich it with the 4-TF context
+    const sig = { ...m5 };
+    sig.mtfRoadmap = mtfRoadmap;
+    
+    const cooldownKey = `${sig.symbol}_${sig.action}_MTF`;
+    if (!canAlert(cooldownKey)) return null;
+
+    // Give it a special label
+    let label = '💎 4-TF ALIGNED';
+    if (sig.score >= PREMIUM_SIGNAL_THRESHOLD) label = '👑 PREMIUM MTF';
+    else if (sig.score >= 75) label = '🚀 ELITE MTF';
+
+    const dispatchSig = { ...sig, premiumLabel: label, isElite: true };
+
+    try {
+        await sendSignalAlert(dispatchSig);
+        recordTrade(dispatchSig);
+        await sendToSheet(dispatchSig);
+        
+        // Cooldown for this symbol to avoid spamming the same alignment
+        alertCooldown.set(cooldownKey, Date.now());
+        
+        console.log(`\n[Scanner] 🎯 CONFLUENCE DETECTED: ${sig.symbol} [${sig.action}] aligned on ALL 4 TFs! (${sig.score}% Entry score)`);
+        return dispatchSig;
+    } catch (err) {
+        console.error(`[Scanner] ❌ Dispatch failure:`, err.message);
+        return null;
     }
 }
 

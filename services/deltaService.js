@@ -17,23 +17,49 @@ export async function getDeltaSymbols() {
         return cachedDeltaSymbols;
     }
 
-    try {
-        const res = await axios.get("https://api.delta.exchange/v2/products", { timeout: 10000 });
-        if (res.data && res.data.result) {
-            const symbols = res.data.result
-                .filter(p => p.contract_type === "perpetual_futures")
-                .map(p => p.symbol);
+    // Try multiple API endpoints to get a complete list of products
+    // Note: india.delta.exchange often provides a more comprehensive list for users in that region
+    const endpoints = [
+        "https://api.india.delta.exchange/v2/products",
+        "https://api.delta.exchange/v2/products"
+    ];
+
+    for (const url of endpoints) {
+        try {
+            console.log(`[DeltaService] Fetching symbols from ${url}...`);
+            const res = await axios.get(url, { timeout: 10000 });
             
-            if (symbols.length > 0) {
-                cachedDeltaSymbols = symbols;
-                lastFetchTime = now;
-                return symbols;
+            if (res.data && res.data.result) {
+                const products = res.data.result.filter(p => 
+                    p.contract_type === "perpetual_futures" || p.contract_type === "futures"
+                );
+
+                if (products.length > 0) {
+                    const normalizedSymbols = new Set();
+                    
+                    products.forEach(p => {
+                        const s = p.symbol;
+                        normalizedSymbols.add(s);
+                        
+                        // Delta often uses 'BTCUSD' for perps, while Binance uses 'BTCUSDT'
+                        // We add normalized versions to ensure matching in marketScanner
+                        if (s.endsWith('USD')) {
+                            normalizedSymbols.add(s + 'T'); // BTCUSD -> BTCUSDT
+                        }
+                    });
+
+                    cachedDeltaSymbols = Array.from(normalizedSymbols);
+                    lastFetchTime = now;
+                    console.log(`[DeltaService] Successfully loaded ${cachedDeltaSymbols.length} normalized symbols from ${url}`);
+                    return cachedDeltaSymbols;
+                }
             }
+        } catch (err) {
+            console.warn(`[DeltaService] Failed to fetch symbols from ${url}: ${err.message}`);
         }
-    } catch (err) {
-        console.warn(`[DeltaService] Failed to fetch symbols from Delta API: ${err.message}. Using fallback.`);
     }
 
+    console.error(`[DeltaService] All symbol fetch attempts failed. Using static fallback.`);
     // Fallback to static list if API fails
     return defaultDeltaSymbols;
 }

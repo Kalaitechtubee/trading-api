@@ -11,9 +11,10 @@
 
 ### 🔍 Advanced Market Scanning
 *   **Multi-Asset Support:** Seamlessly scans both Crypto (Binance Futures) and Forex markets.
-*   **MTF Alignment Engine:** Analyzes price action across 5m, 15m, 1h, and 4h timeframes to ensure trend consistency.
-*   **Dynamic Symbol Selection:** Automatically rotates the scanner's focus to the top 50 high-volume symbols.
-*   **Volatility Filtering:** Intelligent ATR-based filters prevent trading in low-liquidity or "choppy" market conditions.
+*   **STRICT MTF Alignment:** Analysis requires 100% agreement across **5m, 15m, 1h, and 4h** timeframes to eliminate fake signals.
+*   **Anti-Fake Filtering:** Advanced institutional filters (EMA200 Trap, Spread Filter, Volume Spike confirmation) prevent bad entries.
+*   **Symmetrical Dual-Scoring:** Balanced engine ensuring SELL signals are as accurate and frequent as BUY signals.
+*   **Dynamic Symbol Selection:** Automatically rotates focus to high-volume symbols from Delta Exchange.
 
 ### 🧠 Pure Node.js ML Infrastructure
 *   **Local Random Forest Engine:** Zero-dependency ML using `ml-random-forest`, eliminating Python bottlenecks.
@@ -30,7 +31,10 @@
 *   **Real-Time Backtester:** Automatically tracks every signal in `trades.json`, monitoring price action for TP/SL hits.
 *   **Daily AI Reports:** Automated Telegram reports sent via `node-cron` summarizing wins, losses, and daily win rates.
 *   **L2 Redis Caching:** High-performance caching layer to reduce API latency and prevent rate-limiting.
-*   **Institutional Alerts:** Richly formatted Telegram messages with TP1/TP2, SL, Risk/Reward ratios, and bias labels.
+### 🖥️ Institutional Visual Console
+*   **Live Multi-TF Tracking:** See 5m, 15m, 1h, and 4h scores in real-time as the scanner moves through symbols.
+*   **Action Emojis:** 🔍 (Scanning), 🔥 (Momentum Detected), 🎯 (4-TF Confluence Alert).
+*   **Line-Clearing Updates:** Clean terminal experience with dynamic line-clearing to prevent text clutter.
 
 ---
 

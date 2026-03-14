@@ -234,10 +234,10 @@
     "timestamp": 1773071809603,
     "timeframe": "1h",
     "score": 85,
-    "status": "PENDING",
+    "status": "EXPIRED",
     "exitPrice": null,
     "profit": null,
-    "closedAt": null
+    "closedAt": 1773461879302
   },
   {
     "id": "T-1773071813750-DASHUSDT",
@@ -249,10 +249,10 @@
     "timestamp": 1773071813146,
     "timeframe": "5m",
     "score": 80,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 32.88,
+    "profit": 0.5800000000000054,
+    "closedAt": 1773461873082
   },
   {
     "id": "T-1773071848183-ZECUSDT",
@@ -399,10 +399,10 @@
     "timestamp": 1773071876409,
     "timeframe": "1h",
     "score": 75,
-    "status": "PENDING",
+    "status": "EXPIRED",
     "exitPrice": null,
     "profit": null,
-    "closedAt": null
+    "closedAt": 1773461879302
   },
   {
     "id": "T-1773072076781-ETHUSDT",
@@ -6204,10 +6204,10 @@
     "timestamp": 1773225014327,
     "timeframe": "15m",
     "score": 75,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "LOSS",
+    "exitPrice": 0.01138,
+    "profit": -0.0033500000000000005,
+    "closedAt": 1773461876338
   },
   {
     "id": "T-1773225025390-HBARUSDT",
@@ -6549,10 +6549,10 @@
     "timestamp": 1773226449321,
     "timeframe": "15m",
     "score": 75,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "LOSS",
+    "exitPrice": 0.01138,
+    "profit": -0.0034400000000000003,
+    "closedAt": 1773461876338
   },
   {
     "id": "T-1773226461419-RESOLVUSDT",
@@ -6594,10 +6594,10 @@
     "timestamp": 1773226817374,
     "timeframe": "1h",
     "score": 75,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 0.1655,
+    "profit": 0.008700000000000013,
+    "closedAt": 1773461873460
   },
   {
     "id": "T-1773226819021-HUMAUSDT",
@@ -6714,10 +6714,10 @@
     "timestamp": 1773227888328,
     "timeframe": "15m",
     "score": 75,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "LOSS",
+    "exitPrice": 0.01138,
+    "profit": -0.0033300000000000014,
+    "closedAt": 1773461876338
   },
   {
     "id": "T-1773227890663-FLOWUSDT",
@@ -6759,10 +6759,10 @@
     "timestamp": 1773227895362,
     "timeframe": "15m",
     "score": 75,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 0.1655,
+    "profit": 0.008400000000000019,
+    "closedAt": 1773461873460
   },
   {
     "id": "T-1773227897438-VIRTUALUSDT",
@@ -6879,10 +6879,10 @@
     "timestamp": 1773228966404,
     "timeframe": "15m",
     "score": 85,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "LOSS",
+    "exitPrice": 0.01138,
+    "profit": -0.0031800000000000005,
+    "closedAt": 1773461876338
   },
   {
     "id": "T-1773228974098-XLMUSDT",
@@ -6894,10 +6894,10 @@
     "timestamp": 1773228972981,
     "timeframe": "15m",
     "score": 75,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 0.1655,
+    "profit": 0.008300000000000002,
+    "closedAt": 1773461873460
   },
   {
     "id": "T-1773229343924-ZROUSDT",
@@ -7029,10 +7029,10 @@
     "timestamp": 1773230055788,
     "timeframe": "15m",
     "score": 80,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 0.1655,
+    "profit": 0.008000000000000007,
+    "closedAt": 1773461873460
   },
   {
     "id": "T-1773230068010-PORTALUSDT",
@@ -7239,10 +7239,10 @@
     "timestamp": 1773231497287,
     "timeframe": "15m",
     "score": 80,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 0.1655,
+    "profit": 0.007800000000000001,
+    "closedAt": 1773461873460
   },
   {
     "id": "T-1773231839344-XRPUSDT",
@@ -7329,10 +7329,10 @@
     "timestamp": 1773387826657,
     "timeframe": "15m",
     "score": 85,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 4.195,
+    "profit": 0.5880000000000001,
+    "closedAt": 1773461863535
   },
   {
     "id": "T-1773387828242-TRUMPUSDT",
@@ -7344,10 +7344,10 @@
     "timestamp": 1773387826651,
     "timeframe": "1h",
     "score": 85,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 4.195,
+    "profit": 0.5880000000000001,
+    "closedAt": 1773461863535
   },
   {
     "id": "T-1773387838790-TURBOUSDT",
@@ -7404,10 +7404,10 @@
     "timestamp": 1773387868229,
     "timeframe": "15m",
     "score": 85,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 4.195,
+    "profit": 0.5800000000000001,
+    "closedAt": 1773461863535
   },
   {
     "id": "T-1773387869719-TRUMPUSDT",
@@ -7419,10 +7419,10 @@
     "timestamp": 1773387868244,
     "timeframe": "1h",
     "score": 85,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 4.195,
+    "profit": 0.5800000000000001,
+    "closedAt": 1773461863535
   },
   {
     "id": "T-1773387876185-PIXELUSDT",
@@ -7509,10 +7509,10 @@
     "timestamp": 1773388986672,
     "timeframe": "4h",
     "score": 73,
-    "status": "PENDING",
+    "status": "EXPIRED",
     "exitPrice": null,
     "profit": null,
-    "closedAt": null
+    "closedAt": 1773461869642
   },
   {
     "id": "T-1773389079590-ROBOUSDT",
@@ -7554,10 +7554,10 @@
     "timestamp": 1773389081901,
     "timeframe": "4h",
     "score": 73,
-    "status": "PENDING",
+    "status": "EXPIRED",
     "exitPrice": null,
     "profit": null,
-    "closedAt": null
+    "closedAt": 1773461869642
   },
   {
     "id": "T-1773389427324-NEARUSDT",
@@ -7569,10 +7569,10 @@
     "timestamp": 1773389426024,
     "timeframe": "4h",
     "score": 70,
-    "status": "PENDING",
+    "status": "EXPIRED",
     "exitPrice": null,
     "profit": null,
-    "closedAt": null
+    "closedAt": 1773461866237
   },
   {
     "id": "T-1773391624631-NEARUSDT",
@@ -7584,10 +7584,10 @@
     "timestamp": 1773391623432,
     "timeframe": "4h",
     "score": 70,
-    "status": "PENDING",
+    "status": "EXPIRED",
     "exitPrice": null,
     "profit": null,
-    "closedAt": null
+    "closedAt": 1773461866237
   },
   {
     "id": "T-1773391631200-ENSOUSDT",
@@ -7614,10 +7614,10 @@
     "timestamp": 1773392143858,
     "timeframe": "4h",
     "score": 70,
-    "status": "PENDING",
+    "status": "EXPIRED",
     "exitPrice": null,
     "profit": null,
-    "closedAt": null
+    "closedAt": 1773461866237
   },
   {
     "id": "T-1773392151039-ENSOUSDT",
@@ -7644,10 +7644,10 @@
     "timestamp": 1773392168089,
     "timeframe": "4h",
     "score": 75,
-    "status": "PENDING",
+    "status": "EXPIRED",
     "exitPrice": null,
     "profit": null,
-    "closedAt": null
+    "closedAt": 1773461866237
   },
   {
     "id": "T-1773392174513-ENSOUSDT",
@@ -7689,10 +7689,10 @@
     "timestamp": 1773393767285,
     "timeframe": "15m",
     "score": 75,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 0.09891,
+    "profit": 0.001460000000000003,
+    "closedAt": 1773396484979
   },
   {
     "id": "T-1773394290821-DOGEUSDT",
@@ -7719,10 +7719,10 @@
     "timestamp": 1773394288905,
     "timeframe": "15m",
     "score": 85,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 0.09939,
+    "profit": 0.001470000000000013,
+    "closedAt": 1773398986782
   },
   {
     "id": "T-1773394303325-DOGEUSDT",
@@ -7734,10 +7734,10 @@
     "timestamp": 1773394301871,
     "timeframe": "15m",
     "score": 80,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 0.09939,
+    "profit": 0.001470000000000013,
+    "closedAt": 1773398986782
   },
   {
     "id": "T-1773394521066-DOGEUSDT",
@@ -7749,10 +7749,10 @@
     "timestamp": 1773394519166,
     "timeframe": "15m",
     "score": 80,
-    "status": "PENDING",
-    "exitPrice": null,
-    "profit": null,
-    "closedAt": null
+    "status": "WIN",
+    "exitPrice": 0.09939,
+    "profit": 0.001470000000000013,
+    "closedAt": 1773398986782
   },
   {
     "id": "T-1773395406013-BTCUSDT",
@@ -7764,9 +7764,144 @@
     "timestamp": 1773395404923,
     "timeframe": "15m",
     "score": 75,
+    "status": "WIN",
+    "exitPrice": 72540.05,
+    "profit": 645.0100000000093,
+    "closedAt": 1773398489659
+  },
+  {
+    "id": "T-1773396485988-BTCUSDT-5m",
+    "symbol": "BTCUSDT",
+    "action": "BUY",
+    "entryPrice": 72149.38,
+    "stopLoss": 71995.01395166,
+    "target": 72458.11209668,
+    "timestamp": 1773396484733,
+    "timeframe": "5m",
+    "score": 85,
+    "status": "WIN",
+    "exitPrice": 72469.98,
+    "profit": 320.59999999999127,
+    "closedAt": 1773398129558
+  },
+  {
+    "id": "T-1773398988880-SOLUSDT-5m",
+    "symbol": "SOLUSDT",
+    "action": "BUY",
+    "entryPrice": 90.25,
+    "stopLoss": 89.9395694,
+    "target": 90.8708612,
+    "timestamp": 1773398986869,
+    "timeframe": "5m",
+    "score": 90,
+    "status": "LOSS",
+    "exitPrice": 88.58,
+    "profit": -1.6700000000000017,
+    "closedAt": 1773461523396
+  },
+  {
+    "id": "T-1773398989291-SOLUSDT-1h",
+    "symbol": "SOLUSDT",
+    "action": "BUY",
+    "entryPrice": 89.54,
+    "stopLoss": 88.11030397,
+    "target": 92.39939207,
+    "timestamp": 1773398986830,
+    "timeframe": "1h",
+    "score": 70,
+    "status": "EXPIRED",
+    "exitPrice": null,
+    "profit": null,
+    "closedAt": 1773461523396
+  },
+  {
+    "id": "T-1773398989765-XRPUSDT-5m",
+    "symbol": "XRPUSDT",
+    "action": "BUY",
+    "entryPrice": 1.4377,
+    "stopLoss": 1.43318121,
+    "target": 1.44673758,
+    "timestamp": 1773398986768,
+    "timeframe": "5m",
+    "score": 75,
+    "status": "LOSS",
+    "exitPrice": 1.4329,
+    "profit": -0.0047999999999999154,
+    "closedAt": 1773399347542
+  },
+  {
+    "id": "T-1773461882132-ZENUSDT-1h",
+    "symbol": "ZENUSDT",
+    "action": "BUY",
+    "entryPrice": 5.702,
+    "stopLoss": 5.59739728,
+    "target": 5.91120544,
+    "timestamp": 1773461880701,
+    "timeframe": "1h",
+    "score": 80,
+    "status": "LOSS",
+    "exitPrice": 5.556,
+    "profit": -0.1459999999999999,
+    "closedAt": 1773469972729
+  },
+  {
+    "id": "T-1773462071742-MUBARAKUSDT-4h",
+    "symbol": "MUBARAKUSDT",
+    "action": "BUY",
+    "entryPrice": 0.01641,
+    "stopLoss": 0.01568694,
+    "target": 0.01775,
+    "timestamp": 1773462070943,
+    "timeframe": "4h",
+    "score": 70,
     "status": "PENDING",
     "exitPrice": null,
     "profit": null,
     "closedAt": null
+  },
+  {
+    "id": "T-1773464304954-AUCTIONUSDT-4h",
+    "symbol": "AUCTIONUSDT",
+    "action": "BUY",
+    "entryPrice": 4.87,
+    "stopLoss": 4.76047021,
+    "target": 5.08905958,
+    "timestamp": 1773464303946,
+    "timeframe": "4h",
+    "score": 70,
+    "status": "PENDING",
+    "exitPrice": null,
+    "profit": null,
+    "closedAt": null
+  },
+  {
+    "id": "T-1773465531484-TRXUSDT-5m",
+    "symbol": "TRXUSDT",
+    "action": "BUY",
+    "entryPrice": 0.2946,
+    "stopLoss": 0.29430072,
+    "target": 0.29519855,
+    "timestamp": 1773465530378,
+    "timeframe": "5m",
+    "score": 80,
+    "status": "LOSS",
+    "exitPrice": 0.2941,
+    "profit": -0.0005000000000000004,
+    "closedAt": 1773469958263
+  },
+  {
+    "id": "T-1773465544210-SAHARAUSDT-5m",
+    "symbol": "SAHARAUSDT",
+    "action": "BUY",
+    "entryPrice": 0.02638,
+    "stopLoss": 0.02559813,
+    "target": 0.02794374,
+    "timestamp": 1773465542789,
+    "timeframe": "5m",
+    "score": 70,
+    "status": "LOSS",
+    "exitPrice": 0.02545,
+    "profit": -0.0009300000000000003,
+    "closedAt": 1773469002211
   }
 ]

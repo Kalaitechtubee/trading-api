@@ -121,10 +121,17 @@ export function detectMarketStructure(candles) {
 
     let score = 50, structure = 'RANGE', detail = 'Consolidation';
 
-    if (isHH && isHL) { structure = 'BULLISH'; detail = 'HH + HL'; score = isBullishEMA ? 85 : 72; }
-    else if (isLH && isLL) { structure = 'BEARISH'; detail = 'LH + LL'; score = !isBullishEMA ? 15 : 28; }
-    else if (isBullishEMA) { structure = 'BULLISH'; detail = 'EMA Support'; score = 65; }
-    else { structure = 'BEARISH'; detail = 'EMA Resistance'; score = 35; }
+    if (isHH && isHL) { 
+        structure = 'BULLISH'; detail = 'HH + HL'; score = isBullishEMA ? 85 : 72; 
+    } else if (isLH && isLL) { 
+        structure = 'BEARISH'; detail = 'LH + LL'; score = !isBullishEMA ? 15 : 28; 
+    } else {
+        // Range logic: only trend if EMAs have clear slope
+        const slope = (ema20[ema20.length - 1] - ema20[ema20.length - 5]) / ema20[ema20.length - 5];
+        if (slope > 0.001) { structure = 'BULLISH'; detail = 'EMA Slope+'; score = 60; }
+        else if (slope < -0.001) { structure = 'BEARISH'; detail = 'EMA Slope-'; score = 40; }
+        else { structure = 'RANGE'; detail = 'Flat'; score = 50; }
+    }
 
     return { structure, detail, score };
 }
@@ -531,6 +538,11 @@ export async function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknow
     const volScore = volatilityScore(candles);
     const vwapScore = vwapData.score;
 
+    // ── Primary Detectors (Moved up to prevent init errors) ──
+    const candleAnalysis = detectCandlePattern(candles);
+    const liquiditySweep = detectLiquiditySweep(candles);
+    const orderBlock = detectOrderBlocks(candles);
+
     // ── Indicator Pre-calculation (Fixed for ReferenceError) ──
     const rsiValues = RSI.calculate({ values: prices, period: 14 });
     const ema200Arr = EMA.calculate({ values: prices, period: 200 });
@@ -602,7 +614,7 @@ export async function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknow
         spread = (bestAsk - bestBid) / bestBid;
     }
 
-    // ── STEP 4: DUAL SCORE CALCULATION (Fixes missing SELL signals) ──
+    // ── STEP 5: DUAL SCORE CALCULATION (Fixes missing SELL signals) ──
     let bullishScore = 0;
     let bearishScore = 0;
 
@@ -662,7 +674,11 @@ export async function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknow
 
     // I. EMA 200 Trend (5%)
     if (currentPrice > ema200) bullishScore += 5;
-    else bearishScore += 5;
+    else if (currentPrice < ema200) bearishScore += 5;
+
+    // K. Candle Patterns (New Weight: 8%)
+    if (candleAnalysis.score >= 70) bullishScore += 8;
+    else if (candleAnalysis.score <= 30) bearishScore += 8;
 
     // J. ML Prediction Bonus (up to +8 pts)
     if (mlPrediction && mlPrediction.available) {
@@ -685,10 +701,7 @@ export async function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknow
     const bullishProb = Math.round(Math.min(Math.max(bullishScore, 0), 100));
     const bearishProb = Math.round(Math.min(Math.max(bearishScore, 0), 100));
 
-    // ── STEP 5: Risk & Alignment ──────────────────────────────
-    const liquiditySweep = detectLiquiditySweep(candles);
-    const orderBlock = detectOrderBlocks(candles);
-    const patternData = detectCandlePattern(candles);
+    // ── STEP 6: Risk & Alignment ──────────────────────────────
     const volumeScore_val = (volumeData.score + volProfile.score) / 2;
     const breakoutProb = calculateBreakoutProbability(candles, volumeScore_val, momentumScore, volScore);
 
@@ -746,6 +759,14 @@ export async function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknow
     if (isBadTime && adjustedProb < 85) {
         finalAction = 'WAIT';
     }
+
+    // ── Trend Alignment Strictness ──
+    const isBullTrend = currentPrice > ema200;
+    const isBearTrend = currentPrice < ema200;
+    
+    // Require higher score for counter-trend trades to avoid fakes
+    if (finalAction === 'BUY' && isBearTrend && adjustedProb < 82) finalAction = 'WAIT';
+    if (finalAction === 'SELL' && isBullTrend && adjustedProb < 82) finalAction = 'WAIT';
 
 
     // ── ADVANCED ACCURACY FILTERS ──
@@ -898,7 +919,7 @@ export async function runAIAnalysis(candles, timeframe = '15m', symbol = 'Unknow
         isVolumeSpike,
         factors,
         trend: marketStructureScore > 60 ? 'Bullish' : marketStructureScore < 40 ? 'Bearish' : 'Neutral',
-        patterns: patternData.type,
+        patterns: candleAnalysis.type,
         timestamp: Date.now(),
         expiresAt: Date.now() + expiresInMs,
         isRegimeAligned,

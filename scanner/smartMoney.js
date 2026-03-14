@@ -321,10 +321,10 @@ export function calculateOrderflow(candles, period = 20) {
 // 5. ML PREDICTION CLIENT (Python Flask API Bridge)
 // ═══════════════════════════════════════════════════════════════
 
-// Default ML API endpoint — configure via .env
-const ML_API_URL = process.env.ML_API_URL || 'http://localhost:5001/predict';
-const ML_ENGINE  = process.env.ML_ENGINE  || 'python'; // 'python' or 'node'
-const ML_TIMEOUT_MS = 3000; // 3 seconds max
+// ── Hardcoded Config (no .env needed) ────────────────────────
+const ML_API_URL    = 'http://localhost:5001/predict';
+const ML_ENGINE     = 'node'; // 'python' or 'node'
+const ML_TIMEOUT_MS = 3000;  // 3 seconds max
 
 /**
  * getMLPrediction

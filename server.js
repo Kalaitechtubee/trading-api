@@ -6,7 +6,6 @@
 
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { scanMarket } from './scanner/marketScanner.js';
 import signalRoutes from './routes/signals.js';
 import cron from 'node-cron';
@@ -14,21 +13,19 @@ import { sendDailyReport } from './services/telegramService.js';
 
 import scannerConfig from './config/scannerConfig.js';
 
-// Load environment variables from backend/.env
-dotenv.config();
+// ── Hardcoded Config (no .env needed) ────────────────────────
+const PORT             = 5000;
+const SCAN_INTERVAL_MS = 180000;   // 3 minutes
+const FRONTEND_URL     = '';       // Set your production frontend URL here if needed
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-
-// ── Scan interval (milliseconds) ─────────────────────────────
-const SCAN_INTERVAL_MS = parseInt(process.env.SCAN_INTERVAL_MS) || scannerConfig.scanIntervalMs;
 
 // ── Middleware ────────────────────────────────────────────────
 app.use(cors({
     origin: [
         'http://localhost:5173',        // Vite dev server
         'http://localhost:3000',        // CRA dev server
-        process.env.FRONTEND_URL        // Production frontend URL
+        FRONTEND_URL                    // Production frontend URL
     ].filter(Boolean),
     credentials: true
 }));
@@ -77,21 +74,10 @@ app.listen(PORT, () => {
   ✅ API endpoint       → http://localhost:${PORT}/api/signals
   ✅ Health check       → http://localhost:${PORT}/health
   🔄 Scan interval      → every ${SCAN_INTERVAL_MS / 1000} seconds
-  📡 Telegram alerts    → ${process.env.TELEGRAM_TOKEN ? 'Enabled ✅' : 'Disabled ⚠️ (set TELEGRAM_TOKEN)'}
+  📡 Telegram alerts    → Enabled ✅
 `);
 
-    // ── Render/Production Check ─────────────────────────────────
-    const missingVars = [];
-    if (!process.env.TELEGRAM_TOKEN) missingVars.push('TELEGRAM_TOKEN');
-    if (!process.env.TELEGRAM_CHAT) missingVars.push('TELEGRAM_CHAT');
-    if (!process.env.FOREX_API_KEY) missingVars.push('FOREX_API_KEY');
-
-    if (missingVars.length > 0) {
-        console.error(`\n❌ CRITICAL: Missing Environment Variables: ${missingVars.join(', ')}`);
-        console.error(`⚠️  The scanner will NOT send signals correctly on Render without these set manually in the Dashboard.\n`);
-    } else {
-        console.log('✅ All environment variables verified. Scanner is ready.');
-    }
+    console.log('✅ All config hardcoded. Scanner is ready.');
 
     // ── Run initial scan immediately on startup ──────────────
     console.log('[Server] Running initial market scan...');

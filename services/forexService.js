@@ -1,8 +1,7 @@
 import axios from "axios";
-import dotenv from 'dotenv';
-dotenv.config();
 
-const API_KEY = process.env.FOREX_API_KEY;
+// ── Hardcoded Config (no .env needed) ────────────────────────
+const API_KEY = '74f94a276d4745c7a0d0525a9d016574';
 
 const intervalMap = {
     "5m": "5min",
